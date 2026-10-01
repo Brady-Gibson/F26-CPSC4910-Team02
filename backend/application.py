@@ -73,8 +73,8 @@ from routes import driver
 application.register_blueprint(driver.bp)
 from routes import sponsor
 application.register_blueprint(sponsor.bp)
-# from routes import admin
-# application.register_blueprint(admin.bp)
+from routes import admin
+application.register_blueprint(admin.bp)
 
 
 @application.route("/")
