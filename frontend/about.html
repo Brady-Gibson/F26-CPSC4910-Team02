@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>About · TigerTruck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --green:#00694B; --green-deep:#004D37; --amber:#FFB81C;
+  --asphalt:#24292E; --concrete:#EDEFEA; --paper:#FFFFFF; --line:#D3D7CF; --muted:#5D6660;
+  --ink:var(--asphalt); --bg:var(--concrete); --surface:var(--paper);
+  --font:"Overpass","Arial Narrow",system-ui,sans-serif;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--ink:#E7EAE6;--bg:#1A1E21;--surface:#23292D;--line:#3A4247;--muted:#A3ACA6;--green:#0E7A58}}
+:root[data-theme="dark"]{--ink:#E7EAE6;--bg:#1A1E21;--surface:#23292D;--line:#3A4247;--muted:#A3ACA6;--green:#0E7A58}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;font-family:var(--font);color:var(--ink);background:var(--bg);line-height:1.55;font-variant-numeric:tabular-nums}
+:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
+
+header{background:var(--asphalt);color:#fff}
+.bar{max-width:1040px;margin:0 auto;padding:14px 24px;display:flex;justify-content:space-between;align-items:center;gap:16px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:900;font-size:20px;color:#fff;text-decoration:none}
+.brand svg{width:32px;height:32px}
+nav{display:flex;gap:6px}
+nav a{color:#D8DDD9;text-decoration:none;font-weight:700;padding:6px 12px;border-radius:6px}
+nav a:hover{background:#30363C}
+nav a[aria-current="page"]{background:var(--amber);color:var(--asphalt)}
+
+main{max-width:1040px;margin:0 auto;padding:40px 24px 64px}
+
+.sign{background:var(--green);color:#fff;border-radius:16px;padding:9px;box-shadow:0 3px 0 var(--green-deep)}
+.sign-in{border:4px solid #fff;border-radius:10px;padding:32px 36px 34px;display:grid;grid-template-columns:1fr auto;gap:10px 28px;align-items:end}
+.route{grid-column:1/-1;display:flex;align-items:center;gap:10px;font-weight:800;font-size:17px}
+.route .tag{background:#fff;color:var(--green);border-radius:5px;padding:1px 9px;font-weight:900}
+h1{margin:0;font-size:clamp(34px,5.6vw,60px);line-height:1.02;font-weight:900;letter-spacing:-.5px;max-width:16ch}
+.exit{background:var(--amber);color:var(--asphalt);border-radius:8px;padding:10px 16px;text-align:center;font-weight:900;font-size:22px;line-height:1.1;white-space:nowrap}
+.exit small{display:block;font-size:13px;font-weight:800}
+.lede{grid-column:1/-1;margin:6px 0 0;font-size:19px;max-width:60ch;opacity:.95}
+
+.facts{display:grid;grid-template-columns:repeat(4,1fr);gap:0;margin-top:28px;background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.fact{padding:18px 20px;border-left:1px solid var(--line)}
+.fact:first-child{border-left:0}
+.fact dt{color:var(--muted);font-size:14px;font-weight:700}
+.fact dd{margin:2px 0 0;font-size:24px;font-weight:900}
+
+.cols{display:grid;grid-template-columns:1.3fr 1fr;gap:28px;margin-top:40px}
+h2{font-size:22px;margin:0 0 12px;font-weight:900}
+p{margin:0 0 14px;max-width:64ch}
+.roles{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+.roles li{background:var(--surface);border:1px solid var(--line);border-left:5px solid var(--green);border-radius:8px;padding:12px 16px}
+.roles b{display:block;font-size:17px}
+.roles span{color:var(--muted);font-size:15px}
+
+footer{border-top:1px solid var(--line);color:var(--muted);font-size:14px}
+footer .bar{padding:18px 24px}
+
+@media (max-width:760px){
+  .sign-in{grid-template-columns:1fr;padding:24px}
+  .exit{justify-self:start}
+  .facts{grid-template-columns:1fr 1fr}
+  .fact:nth-child(3){border-left:0}
+  .fact:nth-child(n+3){border-top:1px solid var(--line)}
+  .cols{grid-template-columns:1fr}
+  nav a:not([aria-current]){display:none}
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <a class="brand" href="login.html">
+      <svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 2c5 3 11 3 16 1 2 13-1 27-16 35C5 30 2 16 4 3c5 2 11 2 16-1z" fill="#00694B" stroke="#fff" stroke-width="2.5"/><text x="20" y="26" text-anchor="middle" font-family="Overpass,sans-serif" font-weight="900" font-size="13" fill="#FFB81C">02</text></svg>
+      TigerTruck
+    </a>
+    <nav aria-label="Main"><a href="#" aria-current="page">About</a><a href="login.html">Sign in</a></nav>
+  </div>
+</header>
+
+<main>
+  <section class="sign" aria-labelledby="title">
+    <div class="sign-in">
+      <div class="route"><span class="tag" id="team"></span><span>CPSC 4910 · Fall 2026</span></div>
+      <h1 id="title"></h1>
+      <div class="exit"><span id="version"></span><small id="date"></small></div>
+      <p class="lede" id="desc"></p>
+    </div>
+  </section>
+
+  <dl class="facts">
+    <div class="fact"><dt>Team</dt><dd id="f-team"></dd></div>
+    <div class="fact"><dt>Version</dt><dd id="f-version"></dd></div>
+    <div class="fact"><dt>Release date</dt><dd id="f-date"></dd></div>
+    <div class="fact"><dt>Product</dt><dd>TigerTruck</dd></div>
+  </dl>
+
+  <div class="cols">
+    <section>
+      <h2>How it works</h2>
+      <p>Trucking companies sponsor their drivers and reward safe, on-time driving with points. Sponsors can add or remove points at any time and always give a reason, so drivers know exactly why their balance changed.</p>
+      <p>Drivers spend their points in a catalog their sponsor builds from a live product feed. Orders deduct points right away, and cancelled orders are refunded.</p>
+    </section>
+    <section>
+      <h2>Who uses it</h2>
+      <ul class="roles">
+        <li><b>Drivers</b><span>Apply to a sponsor, track points, and redeem rewards.</span></li>
+        <li><b>Sponsors</b><span>Review applications, award points, and manage the catalog.</span></li>
+        <li><b>Admins</b><span>Manage accounts and sponsors, and review audit logs.</span></li>
+      </ul>
+    </section>
+  </div>
+</main>
+
+<footer><div class="bar"><span>Good (Truck) Driver Incentive Program</span><span id="foot"></span></div></footer>
+
+<script>
+// Mirrors the about_release table. Later, replace with: fetch("/api/about").then(r => r.json())
+const ABOUT = {
+  team_number: "Team 02",
+  version_number: "Sprint 1",
+  release_date: "2026-09-16",
+  product_name: "Good (Truck) Driver Incentive Program",
+  product_description: "A web application where sponsor companies award and deduct points to truck drivers based on driving behavior, and drivers redeem points for products in their sponsor's catalog."
+};
+
+const date = new Date(ABOUT.release_date + "T12:00:00")
+  .toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+const set = (id, v) => document.getElementById(id).textContent = v;
+set("team", ABOUT.team_number);
+set("title", ABOUT.product_name);
+set("version", ABOUT.version_number);
+set("date", "Released " + date);
+set("desc", ABOUT.product_description);
+set("f-team", ABOUT.team_number.replace("Team ", ""));
+set("f-version", ABOUT.version_number);
+set("f-date", date);
+set("foot", `${ABOUT.team_number} · ${ABOUT.version_number}`);
+document.title = `About · ${ABOUT.product_name}`;
+</script>
+</body>
+</html>
