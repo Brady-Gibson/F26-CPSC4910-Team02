@@ -42,14 +42,14 @@
       <div class="auth-row"><span></span><a href="#" id="forgot">Forgot password?</a></div>
       <button class="btn go" type="submit" id="submit">Sign in</button>
     </form>
-    <div class="demo">
-      <p>Test accounts from seed data (any password works until the backend checks hashes)</p>
-      <div class="row">
-        <button class="btn ghost sm" data-demo="testdriver">Driver</button>
-        <button class="btn ghost sm" data-demo="testsponsor">Sponsor</button>
-        <button class="btn ghost sm" data-demo="testadmin">Admin</button>
-      </div>
+    <div class="demo" id="offlineNote" hidden>
+      <p>Offline preview (opened as a file): sign in as testdriver, testsponsor, or testadmin with any password. Nothing here is real data.</p>
     </div>
+    <div id="signedIn" hidden style="margin-top:22px">
+      <div class="auth-err" style="background:var(--ok-bg);color:inherit" id="signedInMsg"></div>
+      <div class="row" style="margin-top:12px"><a class="btn go" id="continueBtn" href="#" style="text-decoration:none">Continue</a><button class="btn ghost" id="signOutBtn" type="button">Sign out</button></div>
+    </div>
+  </div>
   </div>
 </main>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -62,17 +62,23 @@ const params = new URLSearchParams(location.search);
 const next = params.get("next");
 
 App.ready.then(async () => {
+  if (FILE_MODE) { $("#offlineNote").hidden = false; }
   if (LIVE) {
     const r = await fetch("/api/me", { credentials: "same-origin" });
-    if (r.ok) { location.replace(HOME[(await r.json()).user.role] + ".html"); return; }
-    // Test-account buttons only when the dev bootstrap is on (never in production)
-    if (!Object.keys(DB).length) $(".demo").hidden = true;
-    else $(".demo p").textContent = "Test accounts (password Password123! after running backend/scripts/set_test_passwords.py)";
+    if (r.ok) showSignedIn((await r.json()).user);
     return;
   }
-  const s = App.session();
-  if (s && user(s.user_id)) location.replace(HOME[s.role] + ".html");
+  if (FILE_MODE) { const s = App.session(); if (s && user(s.user_id)) { const u = user(s.user_id); showSignedIn({ ...u, role: s.role }); } }
 });
+
+// Already signed in: offer Continue / Sign out instead of redirecting
+function showSignedIn(u){
+  $("#loginForm").hidden = true;
+  $("#signedIn").hidden = false;
+  $("#signedInMsg").textContent = `You're signed in as ${u.first_name} ${u.last_name}.`;
+  $("#continueBtn").href = HOME[u.role] + ".html";
+  $("#signOutBtn").onclick = App.logout;
+}
 
 $("#showPw").onclick = () => {
   const p = $("#pass"), show = p.type === "password";
@@ -81,10 +87,6 @@ $("#showPw").onclick = () => {
   $("#showPw").setAttribute("aria-label", show ? "Hide password" : "Show password");
 };
 $("#forgot").onclick = e => { e.preventDefault(); toast("Password reset isn't set up yet. Ask your sponsor or an admin."); };
-
-document.querySelectorAll("[data-demo]").forEach(b => b.onclick = () => {
-  $("#user").value = b.dataset.demo; $("#pass").value = "Password123!"; $("#loginForm").requestSubmit();
-});
 
 $("#loginForm").onsubmit = async e => {
   e.preventDefault();

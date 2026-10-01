@@ -166,3 +166,5 @@ body.auth{min-height:100vh;display:grid;grid-template-columns:minmax(320px,1fr) 
   .auth-side{padding:24px}
   .auth-sign p,.auth-note{display:none}
 }
+
+[hidden]{display:none!important}
