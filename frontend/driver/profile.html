@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Profile · TigerTruck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/app.css">
+</head>
+<body data-root="../">
+<div class="shell"><aside class="rail" id="rail"></aside><main id="main" tabindex="-1"><div class="loading">Loading…</div></main></div>
+<dialog id="dlg"><form method="dialog" class="dlg" id="dlgBody"></form></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="../assets/js/mock-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script>
+VIEWS.driver.profile = () => { const u=user(ME.driver);
+  return `<div class="head"><div><h1>Profile</h1></div></div><div class="grid g2"><div class="panel"><div class="grid" style="gap:12px">
+  ${[["first_name","First name"],["last_name","Last name"],["email","Email"],["phone","Phone"]].map(([k,l])=>`<label class="field">${l}<input type="text" data-f="${k}" value="${esc(u[k])}"></label>`).join("")}
+  <button class="btn go" id="saveP">Save changes</button></div></div>
+  <div class="panel"><h2>Account</h2><p>Username <b>${esc(u.username)}</b></p><p>Status ${badge(u.account_status)}</p><button class="btn ghost">Change password</button>${src("user_account","audit_event")}</div></div>`; };
+
+bind.driver.profile = () => { $("#saveP").onclick=()=>{const u=user(ME.driver); document.querySelectorAll("[data-f]").forEach(i=>u[i.dataset.f]=i.value); u.updated_at=now(); toast("Changes saved");}; };
+
+App.start("driver", "profile");
+</script>
+</body>
+</html>

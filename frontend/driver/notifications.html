@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Notifications · TigerTruck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/app.css">
+</head>
+<body data-root="../">
+<div class="shell"><aside class="rail" id="rail"></aside><main id="main" tabindex="-1"><div class="loading">Loading…</div></main></div>
+<dialog id="dlg"><form method="dialog" class="dlg" id="dlgBody"></form></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="../assets/js/mock-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script>
+VIEWS.driver.notifications = () => {
+  const ns=DB.notification.filter(x=>x.user_id===ME.driver).sort(byNewest), p=DB.alert_preference.find(x=>x.user_id===ME.driver)||{point_change_enabled:true,order_summary_enabled:true,drop_alert_enabled:true};
+  const sw=(k,l,h)=>`<label class="switch"><span><b>${l}</b><br><span class="dim">${h}</span></span><input type="checkbox" data-pref="${k}" ${p[k]?"checked":""} ${k==="drop_alert_enabled"?"disabled":""}></label>`;
+  return `<div class="head"><div><h1>Notifications</h1></div><button class="btn ghost" id="readAll">Mark all as read</button></div>
+  <div class="grid g2"><div class="panel flush"><div class="list">${ns.map(x=>`<div class="li ${x.is_read?"":"unread"}"><div>${esc(x.message)}<br><span class="dim">${fmtDT(x.created_at)}</span></div>${badge(x.notification_type)}</div>`).join("")||`<div class="empty">You're all caught up.</div>`}</div></div>
+  <div class="panel"><h2>Alert settings</h2>${sw("point_change_enabled","Point changes","When your sponsor adds or removes points")}${sw("order_summary_enabled","Order updates","When an order is placed, ships, or is cancelled")}${sw("drop_alert_enabled","Removed from a sponsor","Always on so you never miss it")}
+  ${src("notification","alert_preference")}</div></div>`;
+};
+
+bind.driver.notifications = () => {
+  $("#readAll").onclick=()=>{DB.notification.filter(x=>x.user_id===ME.driver).forEach(x=>x.is_read=true); App.render();};
+  document.querySelectorAll("[data-pref]").forEach(c=>c.onchange=()=>{let pr=DB.alert_preference.find(x=>x.user_id===ME.driver); if(!pr){pr={user_id:ME.driver,point_change_enabled:true,order_summary_enabled:true,drop_alert_enabled:true}; DB.alert_preference.push(pr);} pr[c.dataset.pref]=c.checked; toast("Alert settings saved");});
+};
+
+App.start("driver", "notifications");
+</script>
+</body>
+</html>
