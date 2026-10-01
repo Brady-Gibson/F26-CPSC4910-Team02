@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sign in · TigerTruck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body class="auth" data-root="">
+<aside class="auth-side">
+  <div class="brand">
+    <svg class="shield" viewBox="0 0 40 40" aria-hidden="true"><path d="M20 2c5 3 11 3 16 1 2 13-1 27-16 35C5 30 2 16 4 3c5 2 11 2 16-1z" fill="#00694B" stroke="#fff" stroke-width="2.5"/><text x="20" y="26" text-anchor="middle" font-family="Overpass,sans-serif" font-weight="900" font-size="13" fill="#FFB81C">02</text></svg>
+    TigerTruck
+  </div>
+  <div class="sign auth-sign">
+    <div class="sign-in">
+      <div class="sign-label">Good Driver Incentive Program</div>
+      <h1>Drive safe. Earn points. Get rewards.</h1>
+      <p>Your sponsor rewards safe, on-time driving with points you can spend in their catalog.</p>
+      <div class="sign-exit">Sign in<small>Drivers · Sponsors · Admins</small></div>
+    </div>
+  </div>
+  <div class="auth-note">Team 02 · CPSC 4910 · <a href="about.html">About this project</a></div>
+</aside>
+
+<main class="auth-main">
+  <div class="auth-card">
+    <h2>Sign in</h2>
+    <p class="dim" style="margin:0">Use the username or email your sponsor or admin set up for you.</p>
+    <form id="loginForm" novalidate>
+      <div class="auth-err" id="err" role="alert" aria-live="assertive"></div>
+      <label class="field">Username or email
+        <input type="text" id="user" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+      </label>
+      <label class="field">Password
+        <span class="pw"><input type="password" id="pass" name="password" autocomplete="current-password" required>
+        <button type="button" id="showPw" aria-label="Show password">Show</button></span>
+      </label>
+      <div class="auth-row"><span></span><a href="#" id="forgot">Forgot password?</a></div>
+      <button class="btn go" type="submit" id="submit">Sign in</button>
+    </form>
+    <div class="demo">
+      <p>Test accounts from seed data (any password works until the backend checks hashes)</p>
+      <div class="row">
+        <button class="btn ghost sm" data-demo="testdriver">Driver</button>
+        <button class="btn ghost sm" data-demo="testsponsor">Sponsor</button>
+        <button class="btn ghost sm" data-demo="testadmin">Admin</button>
+      </div>
+    </div>
+  </div>
+</main>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="assets/js/mock-data.js"></script>
+<script src="assets/js/app.js"></script>
+<script>
+applyPrefs();
+const params = new URLSearchParams(location.search);
+const next = params.get("next");
+
+App.ready.then(async () => {
+  if (LIVE) {
+    const r = await fetch("/api/me", { credentials: "same-origin" });
+    if (r.ok) { location.replace(HOME[(await r.json()).user.role] + ".html"); return; }
+    // Test-account buttons only when the dev bootstrap is on (never in production)
+    if (!Object.keys(DB).length) $(".demo").hidden = true;
+    else $(".demo p").textContent = "Test accounts (password Password123! after running backend/scripts/set_test_passwords.py)";
+    return;
+  }
+  const s = App.session();
+  if (s && user(s.user_id)) location.replace(HOME[s.role] + ".html");
+});
+
+$("#showPw").onclick = () => {
+  const p = $("#pass"), show = p.type === "password";
+  p.type = show ? "text" : "password";
+  $("#showPw").textContent = show ? "Hide" : "Show";
+  $("#showPw").setAttribute("aria-label", show ? "Hide password" : "Show password");
+};
+$("#forgot").onclick = e => { e.preventDefault(); toast("Password reset isn't set up yet. Ask your sponsor or an admin."); };
+
+document.querySelectorAll("[data-demo]").forEach(b => b.onclick = () => {
+  $("#user").value = b.dataset.demo; $("#pass").value = "Password123!"; $("#loginForm").requestSubmit();
+});
+
+$("#loginForm").onsubmit = async e => {
+  e.preventDefault();
+  $("#err").textContent = "";
+  $("#submit").disabled = true; $("#submit").textContent = "Signing in…";
+  const res = await App.login($("#user").value, $("#pass").value);
+  if (!res.ok) {
+    $("#err").textContent = res.error;
+    $("#submit").disabled = false; $("#submit").textContent = "Sign in";
+    $("#pass").select();
+    return;
+  }
+  // Only follow ?next= if it belongs to this user's role
+  const dest = next && next.startsWith(res.home.split("/")[0] + "/") ? next : res.home;
+  location.href = dest + ".html";
+};
+</script>
+</body>
+</html>
