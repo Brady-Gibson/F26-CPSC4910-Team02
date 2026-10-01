@@ -5,12 +5,15 @@
    Two modes, picked automatically on load:
    - LIVE (served by Flask and /api/health answers): real login via /api/login, pages call App.api(...).
      Pages not converted yet read DB, which /api/bootstrap fills from MySQL (dev only).
-   - Sample (opened as files): DB comes from window.MOCK, login is simulated, edits stay in this tab. */
+   - Sample (opened as a local file only): DB comes from window.MOCK, login is simulated, edits stay in this tab.
+   - Offline (served, but Flask/DB unreachable): pages show an error. Never falls back to sample data. */
 
 const ROOT = document.body.dataset.root || "";
 let DB = {};
 let DATA_SOURCE = "sample data";
 let LIVE = false;
+let OFFLINE = false;
+const FILE_MODE = location.protocol === "file:";
 let role = null;
 const ME = {};
 const VIEWS = { driver:{}, sponsor:{}, admin:{} };
@@ -138,6 +141,7 @@ const App = {
   ready: (async () => {
     try { const h = await fetch("/api/health"); LIVE = h.ok && (await h.json()).ok === true; } catch { LIVE = false; }
     if (LIVE) { DATA_SOURCE = "live MySQL"; await loadBootstrap(); return; }
+    if (!FILE_MODE) { OFFLINE = true; DATA_SOURCE = "offline"; return; }  // served site: no sample-data fallback
     const saved = store.get("tt_db");
     if (saved) { DB = saved.db; DATA_SOURCE = saved.source; return; }
     DB = fromCols(window.MOCK); DATA_SOURCE = "sample data"; saveDB();
@@ -166,6 +170,7 @@ const App = {
   async start(r, page){
     applyPrefs();
     await App.ready;
+    if (OFFLINE) { showOffline(); return; }
     let s = App.session();
     if (LIVE) {
       const r = await fetch("/api/me", { credentials: "same-origin" });
@@ -193,6 +198,7 @@ const App = {
 
   async login(identifier, password){
     await App.ready;
+    if (OFFLINE) return { ok: false, error: "Can't reach the server right now. Try again in a minute." };
     if (LIVE) {
       try {
         const d = await App.api("/api/login", { method: "POST", body: { username: identifier, password }, redirectOn401: false });
@@ -233,6 +239,13 @@ const App = {
 function applyPrefs(){
   const t = pref.get("tt_theme"); if (t) document.documentElement.dataset.theme = t;
   if (pref.get("tt_src")==="1") document.body.classList.add("show-src");
+}
+
+function showOffline(){
+  document.querySelector(".shell")?.classList.add("offline");
+  $("#main").innerHTML = `<div class="panel" style="max-width:520px"><h2>Can't reach the server</h2>
+    <p class="dim">The site is up, but it can't connect to the backend right now. Try again in a minute.</p>
+    <button class="btn go" onclick="location.reload()">Try again</button></div>`;
 }
 
 async function loadBootstrap(){
