@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sponsors · TigerTruck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/app.css">
+</head>
+<body data-root="../">
+<div class="shell"><aside class="rail" id="rail"></aside><main id="main" tabindex="-1"><div class="loading">Loading…</div></main></div>
+<dialog id="dlg"><form method="dialog" class="dlg" id="dlgBody"></form></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="../assets/js/mock-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script>
+VIEWS.admin.sponsors = () => `<div class="head"><div><h1>Sponsors</h1><p class="sub">Organizations using the program.</p></div><button class="btn go">Add sponsor</button></div>
+  <div class="panel flush"><div class="tw"><table><thead><tr><th>Sponsor</th><th>Status</th><th class="num">Drivers</th><th class="num">Sponsor users</th><th class="num">1 point</th><th class="num">Points outstanding</th><th></th></tr></thead><tbody>
+  ${DB.sponsor_organization.map(s=>{const ds=DB.driver.filter(d=>d.sponsor_id===s.sponsor_id&&d.participation_status==="ACTIVE");
+    return `<tr><td><b>${esc(s.sponsor_name)}</b><br><span class="dim">${esc(s.contact_email)}</span></td><td>${badge(s.status)}</td><td class="num">${ds.length}</td><td class="num">${DB.sponsor_user.filter(u=>u.sponsor_id===s.sponsor_id).length}</td><td class="num">${usd(s.point_dollar_rate)}</td>
+    <td class="num">${n(ds.reduce((a,d)=>a+d.current_points,0))}</td><td class="num"><button class="btn ghost sm" data-st="${s.sponsor_id}">${s.status==="ACTIVE"?"Deactivate":"Activate"}</button></td></tr>`;}).join("")}
+  </tbody></table></div></div>${src("sponsor_organization","driver","sponsor_user")}`;
+
+bind.admin.sponsors = () => document.querySelectorAll("[data-st]").forEach(b=>b.onclick=()=>{const s=sponsor(+b.dataset.st); s.status=s.status==="ACTIVE"?"INACTIVE":"ACTIVE"; toast(`${s.sponsor_name} ${s.status.toLowerCase()}`); App.render();});
+
+App.start("admin", "sponsors");
+</script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>About · TigerTruck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/app.css">
+</head>
+<body data-root="../">
+<div class="shell"><aside class="rail" id="rail"></aside><main id="main" tabindex="-1"><div class="loading">Loading…</div></main></div>
+<dialog id="dlg"><form method="dialog" class="dlg" id="dlgBody"></form></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="../assets/js/mock-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script>
+VIEWS.admin.about = () => { const r=DB.about_release[DB.about_release.length-1];
+  return `<div class="head"><div><h1>About</h1><p class="sub">Shown on the public about page.</p></div></div>
+  <div class="panel" style="max-width:640px"><h2>${esc(r.product_name)}</h2><p>${esc(r.product_description)}</p>
+  <p class="dim">Team ${String(r.team_number).padStart(2,"0")} · Version ${esc(r.version_number)} · released ${esc(r.release_date.slice(0,10))}</p>${src("about_release")}</div>`; };
+
+App.start("admin", "about");
+</script>
+</body>
+</html>

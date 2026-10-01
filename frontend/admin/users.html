@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Users · TigerTruck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/app.css">
+</head>
+<body data-root="../">
+<div class="shell"><aside class="rail" id="rail"></aside><main id="main" tabindex="-1"><div class="loading">Loading…</div></main></div>
+<dialog id="dlg"><form method="dialog" class="dlg" id="dlgBody"></form></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="../assets/js/mock-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script>
+VIEWS.admin.users = () => `<div class="head"><div><h1>Users</h1><p class="sub">Every account across drivers, sponsor users, and admins.</p></div>
+  <div class="row"><select id="rf" aria-label="Role"><option value="">All roles</option><option>Driver</option><option>Sponsor user</option><option>Admin</option></select><input type="search" id="uq" placeholder="Search users" aria-label="Search users"></div></div>
+  <div class="panel flush"><div class="tw"><table><thead><tr><th>User</th><th>Role</th><th>Organization</th><th>Status</th><th>Created</th><th></th></tr></thead><tbody>
+  ${DB.user_account.map(u=>{const r=roleOf(u.user_id), su=DB.sponsor_user.find(s=>s.sponsor_user_id===u.user_id), d=driver(u.user_id);
+    const org = su?sponsor(su.sponsor_id).sponsor_name : d&&d.sponsor_id?sponsor(d.sponsor_id).sponsor_name : "—";
+    return `<tr data-r="${r}" data-t="${esc((u.first_name+" "+u.last_name+" "+u.username+" "+u.email).toLowerCase())}"><td><b>${esc(u.first_name)} ${esc(u.last_name)}</b><br><span class="dim">${esc(u.username)} · ${esc(u.email)}</span></td><td>${r}</td><td>${esc(org)}</td><td>${badge(u.account_status)}</td><td>${fmtD(u.created_at)}</td>
+    <td class="num">${u.user_id!==ME.admin?`<button class="btn ${u.account_status==="ACTIVE"?"danger":"ghost"} sm" data-lock="${u.user_id}">${u.account_status==="ACTIVE"?"Lock":"Unlock"}</button>`:""}</td></tr>`;}).join("")}
+  </tbody></table></div></div>${src("user_account","admin","sponsor_user","driver","audit_event")}`;
+
+bind.admin.users = () => {
+  const f=()=>{const r=$("#rf").value,q=$("#uq").value.toLowerCase(); document.querySelectorAll("[data-r]").forEach(t=>t.hidden=!((!r||t.dataset.r===r)&&t.dataset.t.includes(q)));};
+  $("#rf").onchange=f; $("#uq").oninput=f;
+  document.querySelectorAll("[data-lock]").forEach(b=>b.onclick=()=>{const u=user(+b.dataset.lock); u.account_status=u.account_status==="ACTIVE"?"LOCKED":"ACTIVE";
+    DB.audit_event.push({audit_event_id:nextId("audit_event","audit_event_id"),actor_user_id:ME.admin,sponsor_id:null,driver_id:null,category:"ACCOUNT",subject_username:u.username,entity_type:"USER_ACCOUNT",entity_id:u.user_id,success:true,reason_or_details:`Account ${u.account_status.toLowerCase()}`,created_at:now()});
+    toast(`${u.username} ${u.account_status==="ACTIVE"?"unlocked":"locked"}`); App.render();});
+};
+
+App.start("admin", "users");
+</script>
+</body>
+</html>
