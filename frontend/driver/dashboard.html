@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dashboard · TigerTruck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/app.css">
+</head>
+<body data-root="../">
+<div class="shell"><aside class="rail" id="rail"></aside><main id="main" tabindex="-1"><div class="loading">Loading…</div></main></div>
+<dialog id="dlg"><form method="dialog" class="dlg" id="dlgBody"></form></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="../assets/js/mock-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script>
+/* CONVERTED PAGE: the example to copy.
+   1. The view is async and gets its data from one endpoint: GET /api/driver/dashboard (backend/routes/driver.py).
+   2. mockDashboard() builds the same shape from sample data, so the page still works without the backend.
+   3. The HTML only uses `data`, never DB directly. */
+
+function mockDashboard(){
+  const d = myDriver(), u = user(d.driver_id), s = d.sponsor_id ? sponsor(d.sponsor_id) : null;
+  return {
+    driver: { ...d, first_name: u.first_name, last_name: u.last_name,
+              sponsor_name: s?.sponsor_name ?? null, point_dollar_rate: s?.point_dollar_rate ?? null },
+    transactions: DB.point_transaction.filter(t => t.driver_id === d.driver_id).sort(byNewest).slice(0, 5),
+    open_orders: DB.customer_order.filter(o => o.driver_id === d.driver_id && ["PLACED","SHIPPED"].includes(o.status)),
+    next_award: DB.recurring_point_schedule.filter(x => x.driver_id === d.driver_id && x.is_active)
+                  .sort((a, b) => a.next_run_at.localeCompare(b.next_run_at))[0] ?? null,
+  };
+}
+
+VIEWS.driver.dashboard = async () => {
+  const data = LIVE ? await App.api("/api/driver/dashboard") : mockDashboard();
+  const { driver: d, transactions, open_orders, next_award } = data;
+  const dollars = d.point_dollar_rate ? d.current_points * d.point_dollar_rate : 0;
+
+  return `<div class="head"><div><h1>Welcome back, ${esc(d.first_name)}</h1><p class="sub">Keep it safe out there. Points land here as your sponsor awards them.</p></div>
+    <a class="btn go" href="${ROOT}driver/catalog.html" style="text-decoration:none">Browse catalog</a></div>
+  <div class="grid g2">
+    <div class="grid">
+      <div class="sign" role="img" aria-label="${n(d.current_points)} points available">
+        <div class="sign-in"><div class="sign-label">Points available</div>
+          <div><span class="sign-num">${n(d.current_points)}</span><span class="sign-unit">pts</span></div>
+          ${next_award ? `<div class="sign-exit">+${n(next_award.points_amount)} next<small>${fmtD(next_award.next_run_at)}</small></div>` : ""}
+          <div class="sign-foot">${d.sponsor_name ? `Worth about ${usd(dollars)} at ${esc(d.sponsor_name)}` : "Join a sponsor to start earning points"}</div></div></div>
+      <div class="panel"><h2>Open orders</h2>${open_orders.length ? open_orders.map(o => `<div class="row spread" style="padding:6px 0"><span>Order #${o.order_id} · ${n(o.total_points)} pts</span>${badge(o.status)}</div>`).join("") : `<p class="dim">Nothing on the way.</p>`}</div>
+    </div>
+    <div class="panel flush"><h2>Recent activity</h2>${txTable(transactions, false, true)}<div style="padding:0 18px 14px"><a href="${ROOT}driver/points.html">See full history</a>
+      <div class="src">Endpoint: <code>GET /api/driver/dashboard</code> · Reads: <code>DRIVER</code> <code>POINT_TRANSACTION</code> <code>CUSTOMER_ORDER</code> <code>RECURRING_POINT_SCHEDULE</code></div></div></div>
+  </div>`;
+};
+
+App.start("driver", "dashboard");
+</script>
+</body>
+</html>

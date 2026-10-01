@@ -1,19 +1,22 @@
 """Success and failure tests for the Driver Sponsor Application stories.
 
-Test users (from seed data + conftest.py):
+Runs the real app (application.py) and signs in through the real /api/login.
+
+Test users (from seed data + conftest.py), all with password Password123!:
     900003 testdriver     already ACTIVE with sponsor 900001
     900004 newdriver      no sponsor yet
     900002 testsponsor    sponsor user for 900001 (Tiger Test Trucking)
     900005 secondsponsor  sponsor user for 900002 (Second Test Freight)
 """
-NEW_DRIVER, SEED_DRIVER = 900004, 900003
-SPONSOR_1_USER, SPONSOR_2_USER = 900002, 900005
+NEW_DRIVER, SEED_DRIVER = "newdriver", "testdriver"
+SPONSOR_1_USER, SPONSOR_2_USER = "testsponsor", "secondsponsor"
 GOOD = {"sponsor_id": 900001, "cdl_number": "SC1234567", "cdl_state": "sc",
         "years_experience": 4, "notes": "Regional routes"}
 
 
-def login(client, user_id):
-    client.post(f"/test-login/{user_id}")
+def login(client, username):
+    r = client.post("/api/login", json={"username": username, "password": "Password123!"})
+    assert r.status_code == 200, r.get_json()
 
 
 def apply(client, **overrides):
@@ -59,7 +62,7 @@ def test_driver_with_sponsor_cannot_apply_elsewhere(client, db):
     login(client, SEED_DRIVER)
     r = apply(client, sponsor_id=900002)
     assert r.status_code == 409
-    audit = one(db, "SELECT * FROM AUDIT_EVENT WHERE driver_id=%s AND success=0", SEED_DRIVER)
+    audit = one(db, "SELECT * FROM AUDIT_EVENT WHERE driver_id=900003 AND category='APPLICATION' AND success=0")
     assert "already have a sponsor" in audit["reason_or_details"]
 
 
@@ -81,10 +84,10 @@ def test_status_and_rejection_reason(client, db):
     assert r.status_code == 200
 
     login(client, NEW_DRIVER)
-    apps = client.get("/api/driver/applications").get_json()
+    apps = client.get("/api/driver/applications").get_json()["applications"]
     assert apps[0]["status"] == "REJECTED"
     assert apps[0]["rejection_reason"] == "Need 5+ years experience"
-    note = one(db, "SELECT * FROM NOTIFICATION WHERE user_id=%s ORDER BY notification_id DESC", NEW_DRIVER)
+    note = one(db, "SELECT * FROM NOTIFICATION WHERE user_id=900004 ORDER BY notification_id DESC")
     assert note["notification_type"] == "APPLICATION_REJECTED" and "5+ years" in note["message"]
 
     # After a rejection the driver may apply again.
@@ -98,9 +101,9 @@ def test_approval_sets_sponsor_and_notifies(client, db):
     assert client.post(f"/api/sponsor/applications/{app_id}/decision",
                        json={"decision": "APPROVE"}).status_code == 200
 
-    d = one(db, "SELECT * FROM DRIVER WHERE driver_id=%s", NEW_DRIVER)
+    d = one(db, "SELECT * FROM DRIVER WHERE driver_id=900004")
     assert d["sponsor_id"] == 900001 and d["participation_status"] == "ACTIVE"
-    note = one(db, "SELECT * FROM NOTIFICATION WHERE user_id=%s ORDER BY notification_id DESC", NEW_DRIVER)
+    note = one(db, "SELECT * FROM NOTIFICATION WHERE user_id=900004 ORDER BY notification_id DESC")
     assert note["notification_type"] == "APPLICATION_APPROVED"
 
     login(client, NEW_DRIVER)
@@ -134,6 +137,16 @@ def test_cannot_decide_twice(client):
 
 # ---- Access control
 
+def test_sponsor_sees_only_own_applications(client):
+    login(client, NEW_DRIVER)
+    apply(client)
+    login(client, SPONSOR_2_USER)
+    assert client.get("/api/sponsor/applications").get_json()["applications"] == []
+    login(client, SPONSOR_1_USER)
+    apps = client.get("/api/sponsor/applications").get_json()["applications"]
+    assert apps[0]["status"] == "PENDING" and apps[0]["cdl_number"] == "SC1234567"
+
+
 def test_must_be_logged_in(client):
     assert client.get("/api/driver/applications").status_code == 401
 
@@ -152,5 +165,5 @@ def test_driver_cannot_decide(client):
 
 def test_sponsor_list_excludes_current_sponsor(client):
     login(client, SEED_DRIVER)
-    ids = [s["sponsor_id"] for s in client.get("/api/driver/sponsors").get_json()]
+    ids = [s["sponsor_id"] for s in client.get("/api/driver/sponsors").get_json()["sponsors"]]
     assert 900001 not in ids and 900002 in ids

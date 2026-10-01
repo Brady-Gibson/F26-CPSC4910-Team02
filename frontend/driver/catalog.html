@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Catalog · TigerTruck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/app.css">
+</head>
+<body data-root="../">
+<div class="shell"><aside class="rail" id="rail"></aside><main id="main" tabindex="-1"><div class="loading">Loading…</div></main></div>
+<dialog id="dlg"><form method="dialog" class="dlg" id="dlgBody"></form></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="../assets/js/mock-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script>
+VIEWS.driver.catalog = () => {
+  const d = myDriver();
+  if (!d.sponsor_id) return `<div class="head"><div><h1>Catalog</h1><p class="sub">Join a sponsor to unlock their rewards catalog.</p></div></div><a class="btn go" href="${ROOT}driver/sponsor.html">Apply to a sponsor</a>`;
+  const items = DB.catalog_item.filter(c=>c.sponsor_id===d.sponsor_id&&c.is_active);
+  const cats = [...new Set(items.map(i=>product(i.product_id).category))].sort();
+  return `<div class="head"><div><h1>${esc(sponsor(d.sponsor_id).sponsor_name)} catalog</h1><p class="sub">You have ${n(d.current_points)} points to spend.</p></div>
+    <div class="row"><input type="search" id="q" placeholder="Search rewards" aria-label="Search rewards"><select id="cat" aria-label="Category"><option value="">All categories</option>${cats.map(c=>`<option>${esc(c)}</option>`).join("")}</select></div></div>
+  <div class="cards" id="cards">${items.map(ci=>{const p=product(ci.product_id), out=p.availability!=="AVAILABLE", short=ci.point_price>d.current_points;
+    return `<article class="item" data-name="${esc(p.product_name.toLowerCase())}" data-cat="${esc(p.category)}"><div class="ph">${esc(p.product_name)}</div><div class="bd">
+      <span class="dim">${esc(p.category)}</span><span class="nm">${esc(p.product_name)}</span><span class="dim">${esc(p.description)}</span>
+      <span class="pts">${n(ci.point_price)} pts</span>${out?badge("UNAVAILABLE"):""}
+      <button class="btn ${short||out?"ghost":"go"}" data-add="${p.product_id}" ${out?"disabled":""}>${out?"Unavailable":"Add to cart"}</button></div></article>`;}).join("")}</div>
+  ${src("catalog_item","product","shopping_cart","cart_item")}`;
+};
+
+bind.driver.catalog = () => {
+  const f = () => { const q=$("#q").value.toLowerCase(), c=$("#cat").value;
+    document.querySelectorAll(".item").forEach(el=>el.hidden=!(el.dataset.name.includes(q)&&(!c||el.dataset.cat===c))); };
+  $("#q")?.addEventListener("input",f); $("#cat")?.addEventListener("change",f);
+  document.querySelectorAll("[data-add]").forEach(b=>b.onclick=()=>{
+    const d=myDriver(), pid=+b.dataset.add, c=activeCart(true), ci=DB.catalog_item.find(x=>x.sponsor_id===d.sponsor_id&&x.product_id===pid);
+    const ex = DB.cart_item.find(i=>i.cart_id===c.cart_id&&i.product_id===pid);
+    if (ex) ex.quantity++; else DB.cart_item.push({cart_id:c.cart_id,sponsor_id:d.sponsor_id,product_id:pid,quantity:1,point_price_snapshot:ci.point_price});
+    c.updated_at=now(); toast(`Added ${product(pid).product_name} to cart`); renderRail(); saveDB();
+  });
+};
+
+App.start("driver", "catalog");
+</script>
+</body>
+</html>
