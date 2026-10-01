@@ -5,10 +5,17 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 import mysql.connector
 
+from db import close_db
+from routes.driver_applications import bp as driver_applications_bp
+
 load_dotenv()
 
 application = Flask(__name__)
-CORS(application)
+application.secret_key = os.getenv("SECRET_KEY")  # needed for logins (Flask sessions)
+CORS(application, supports_credentials=True)
+
+application.register_blueprint(driver_applications_bp)
+application.teardown_appcontext(close_db)
 
 
 def get_db_connection():

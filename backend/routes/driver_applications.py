@@ -21,9 +21,12 @@ User stories covered
 Who is logged in: this file reads session["user_id"]. The login route (Driver Login
 feature) needs to set that after checking the password.
 
-Register in the main app:
+Register in application.py:
+    from db import close_db
     from routes.driver_applications import bp as driver_applications_bp
-    app.register_blueprint(driver_applications_bp)
+    application.secret_key = os.getenv("SECRET_KEY")
+    application.register_blueprint(driver_applications_bp)
+    application.teardown_appcontext(close_db)
 """
 from functools import wraps
 
@@ -55,7 +58,7 @@ def require_role(table, id_column):
             user_id = session.get("user_id")
             if user_id is None:
                 return error("Please log in.", 401)
-            with get_db().cursor() as cur:
+            with get_db().cursor(dictionary=True) as cur:
                 cur.execute(f"SELECT 1 FROM {table} WHERE {id_column} = %s", (user_id,))
                 if cur.fetchone() is None:
                     return error("You don't have access to this page.", 403)
@@ -122,7 +125,7 @@ def validate_application(data):
 @driver_only
 def list_sponsors(driver_id):
     """Active sponsor organizations, minus the driver's current sponsor."""
-    with get_db().cursor() as cur:
+    with get_db().cursor(dictionary=True) as cur:
         cur.execute(
             """SELECT s.sponsor_id, s.sponsor_name
                  FROM SPONSOR_ORGANIZATION s
@@ -139,7 +142,7 @@ def list_sponsors(driver_id):
 @driver_only
 def my_applications(driver_id):
     """Every application this driver has sent, newest first, with status and reason."""
-    with get_db().cursor() as cur:
+    with get_db().cursor(dictionary=True) as cur:
         cur.execute(
             """SELECT a.application_id, a.sponsor_id, s.sponsor_name, a.status,
                       a.submitted_at, a.decision_at,
@@ -167,7 +170,7 @@ def submit_application(driver_id):
 
     db = get_db()
     try:
-        with db.cursor() as cur:
+        with db.cursor(dictionary=True) as cur:
             # Lock the driver row so two quick clicks can't create two applications.
             cur.execute(
                 "SELECT sponsor_id, participation_status FROM DRIVER WHERE driver_id = %s FOR UPDATE",
@@ -240,7 +243,7 @@ def decide_application(sponsor_user_id, application_id):
 
     db = get_db()
     try:
-        with db.cursor() as cur:
+        with db.cursor(dictionary=True) as cur:
             cur.execute("SELECT sponsor_id FROM SPONSOR_USER WHERE sponsor_user_id = %s",
                         (sponsor_user_id,))
             my_sponsor_id = cur.fetchone()["sponsor_id"]

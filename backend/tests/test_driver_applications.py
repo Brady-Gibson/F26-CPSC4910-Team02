@@ -21,7 +21,7 @@ def apply(client, **overrides):
 
 
 def one(db, sql, *args):
-    with db.cursor() as cur:
+    with db.cursor(dictionary=True) as cur:
         cur.execute(sql, args)
         return cur.fetchone()
 

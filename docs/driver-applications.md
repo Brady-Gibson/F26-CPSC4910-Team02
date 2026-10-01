@@ -7,19 +7,24 @@ Backend for drivers applying to a sponsor, plus the sponsor approve/reject step 
 | File | What it is |
 |---|---|
 | `database/migrations/001_driver_application_details.sql` | Adds CDL number, CDL state, years of experience, and notes to `DRIVER_APPLICATION` |
-| `backend/db.py` | Connection helper (reads `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` from env) |
+| `backend/db.py` | Connection helper (mysql-connector, same `.env` variables as `application.py`) |
 | `backend/routes/driver_applications.py` | The routes (a Flask blueprint) |
 | `backend/tests/` | 14 pytest tests, success and failure cases |
 
 ## Plugging it into the main Flask app
 
+Already done in `backend/application.py`:
+
 ```python
 from db import close_db
 from routes.driver_applications import bp as driver_applications_bp
 
-app.register_blueprint(driver_applications_bp)
-app.teardown_appcontext(close_db)
+application.secret_key = os.getenv("SECRET_KEY")
+application.register_blueprint(driver_applications_bp)
+application.teardown_appcontext(close_db)
 ```
+
+Add `SECRET_KEY=` (any long random string) to your `.env`. Flask needs it to keep users logged in.
 
 The routes read the logged-in user from `session["user_id"]`, so the login route needs to set that.
 If the team already has its own DB helper, change the `from db import get_db` line to use it.
@@ -52,7 +57,7 @@ Needs a local MySQL/MariaDB (never the shared RDS database, the tests drop and r
 
 ```powershell
 cd backend
-pip install flask pymysql pytest
+pip install -r requirements.txt pytest
 $env:TEST_DB_HOST="localhost"; $env:TEST_DB_USER="root"; $env:TEST_DB_PASSWORD="yourpassword"
 python -m pytest tests -v
 ```

@@ -11,7 +11,7 @@ import re
 import sys
 from pathlib import Path
 
-import pymysql
+import mysql.connector
 import pytest
 from flask import Flask, session
 
@@ -36,24 +36,24 @@ def run_sql_file(cur, path):
 
 @pytest.fixture()
 def app():
-    conn = pymysql.connect(host=os.environ["TEST_DB_HOST"], user=os.environ["TEST_DB_USER"],
-                           password=os.environ["TEST_DB_PASSWORD"], autocommit=True)
-    with conn.cursor() as cur:
-        cur.execute(f"DROP DATABASE IF EXISTS {DB_NAME}")
-        cur.execute(f"CREATE DATABASE {DB_NAME}")
-        cur.execute(f"USE {DB_NAME}")
-        run_sql_file(cur, DATABASE / "schema.sql")
-        run_sql_file(cur, DATABASE / "seed_test_data.sql")
-        for migration in sorted((DATABASE / "migrations").glob("*.sql")):
-            run_sql_file(cur, migration)
-        # Extra test rows: a second sponsor, its sponsor user, and a driver with no sponsor.
-        cur.execute("""INSERT INTO SPONSOR_ORGANIZATION (sponsor_id, sponsor_name, status, point_dollar_rate)
-                       VALUES (900002, 'Second Test Freight', 'ACTIVE', 0.01)""")
-        cur.execute("""INSERT INTO USER_ACCOUNT (user_id, username, password_hash, first_name, last_name, email, account_status)
-                       VALUES (900004, 'newdriver', 'x', 'New', 'Driver', 'newdriver@example.com', 'ACTIVE'),
-                              (900005, 'secondsponsor', 'x', 'Second', 'Sponsor', 'second@example.com', 'ACTIVE')""")
-        cur.execute("INSERT INTO DRIVER (driver_id, sponsor_id, participation_status) VALUES (900004, NULL, 'APPLICANT')")
-        cur.execute("INSERT INTO SPONSOR_USER (sponsor_user_id, sponsor_id) VALUES (900005, 900002)")
+    conn = mysql.connector.connect(host=os.environ["TEST_DB_HOST"], user=os.environ["TEST_DB_USER"],
+                                   password=os.environ["TEST_DB_PASSWORD"], autocommit=True)
+    cur = conn.cursor()
+    cur.execute(f"DROP DATABASE IF EXISTS {DB_NAME}")
+    cur.execute(f"CREATE DATABASE {DB_NAME}")
+    cur.execute(f"USE {DB_NAME}")
+    run_sql_file(cur, DATABASE / "schema.sql")
+    run_sql_file(cur, DATABASE / "seed_test_data.sql")
+    for migration in sorted((DATABASE / "migrations").glob("*.sql")):
+        run_sql_file(cur, migration)
+    # Extra test rows: a second sponsor, its sponsor user, and a driver with no sponsor.
+    cur.execute("""INSERT INTO SPONSOR_ORGANIZATION (sponsor_id, sponsor_name, status, point_dollar_rate)
+                   VALUES (900002, 'Second Test Freight', 'ACTIVE', 0.01)""")
+    cur.execute("""INSERT INTO USER_ACCOUNT (user_id, username, password_hash, first_name, last_name, email, account_status)
+                   VALUES (900004, 'newdriver', 'x', 'New', 'Driver', 'newdriver@example.com', 'ACTIVE'),
+                          (900005, 'secondsponsor', 'x', 'Second', 'Sponsor', 'second@example.com', 'ACTIVE')""")
+    cur.execute("INSERT INTO DRIVER (driver_id, sponsor_id, participation_status) VALUES (900004, NULL, 'APPLICANT')")
+    cur.execute("INSERT INTO SPONSOR_USER (sponsor_user_id, sponsor_id) VALUES (900005, 900002)")
     conn.close()
 
     os.environ.update(DB_HOST=os.environ["TEST_DB_HOST"], DB_USER=os.environ["TEST_DB_USER"],
@@ -81,8 +81,8 @@ def client(app):
 
 @pytest.fixture()
 def db():
-    conn = pymysql.connect(host=os.environ["TEST_DB_HOST"], user=os.environ["TEST_DB_USER"],
-                           password=os.environ["TEST_DB_PASSWORD"], database=DB_NAME,
-                           cursorclass=pymysql.cursors.DictCursor, autocommit=True)
+    conn = mysql.connector.connect(host=os.environ["TEST_DB_HOST"], user=os.environ["TEST_DB_USER"],
+                                   password=os.environ["TEST_DB_PASSWORD"], database=DB_NAME,
+                                   autocommit=True)
     yield conn
     conn.close()
