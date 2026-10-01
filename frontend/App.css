@@ -1,0 +1,80 @@
+#root {
+  width: 100%;
+}
+
+.page {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 40px 20px;
+  box-sizing: border-box;
+}
+
+.card {
+  width: 100%;
+  max-width: 750px;
+  padding: 50px;
+  background: white;
+  color: #1f2937;
+  border-radius: 14px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+  text-align: left;
+}
+
+.team {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: #555;
+}
+
+.card h1 {
+  margin: 0 0 18px;
+  font-size: 38px;
+  line-height: 1.2;
+}
+
+.description {
+  margin-bottom: 30px;
+  font-size: 18px;
+  color: #555;
+}
+
+.details {
+  padding: 20px 0;
+  border-top: 1px solid #ddd;
+  border-bottom: 1px solid #ddd;
+}
+
+.details p {
+  margin: 8px 0;
+  font-size: 16px;
+}
+
+.status {
+  margin-top: 25px;
+  padding: 14px 18px;
+  background: #eaf7ee;
+  border: 1px solid #b7dfc2;
+  border-radius: 8px;
+  color: #176b32;
+  font-weight: 700;
+}
+
+.source {
+  margin-top: 12px;
+  font-size: 13px;
+  color: #777;
+}
+
+.error {
+  margin-top: 25px;
+  padding: 14px 18px;
+  background: #fdecec;
+  border: 1px solid #efb8b8;
+  border-radius: 8px;
+  color: #a61b1b;
+  font-weight: 700;
+}
