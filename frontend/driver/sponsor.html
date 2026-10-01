@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>My sponsor · TigerTruck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/app.css">
+</head>
+<body data-root="../">
+<div class="shell"><aside class="rail" id="rail"></aside><main id="main" tabindex="-1"><div class="loading">Loading…</div></main></div>
+<dialog id="dlg"><form method="dialog" class="dlg" id="dlgBody"></form></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="../assets/js/mock-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script>
+/* Driver Sponsor Application (Sprint 3)
+   LIVE: GET /api/driver/sponsors, GET /api/driver/applications, POST /api/driver/applications
+   Sample mode (opened as a file): same page, using the mock data. */
+const STATES = ["AL","AK","AZ","AR","CA","CO","CT","DE","DC","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"];
+
+async function loadSponsorPage(){
+  if (LIVE) {
+    const [{ sponsors }, { applications }] = await Promise.all([App.api("/api/driver/sponsors"), App.api("/api/driver/applications")]);
+    const me = App.me;
+    return { sponsors, applications, current: me.sponsor_id ? { name: me.sponsor_name } : null };
+  }
+  const d = myDriver(), s = d.sponsor_id && d.participation_status === "ACTIVE" ? sponsor(d.sponsor_id) : null;
+  const applications = DB.driver_application.filter(a=>a.driver_id===d.driver_id)
+    .sort((a,b)=>b.submitted_at.localeCompare(a.submitted_at))
+    .map(a=>({ ...a, sponsor_name: sponsor(a.sponsor_id).sponsor_name, rejection_reason: a.status==="REJECTED" ? a.reason : null }));
+  const sponsors = DB.sponsor_organization.filter(o=>o.status==="ACTIVE" && o.sponsor_id!==d.sponsor_id);
+  return { sponsors, applications, current: s ? { name: s.sponsor_name, email: s.contact_email, phone: s.phone, rate: s.point_dollar_rate } : null };
+}
+
+VIEWS.driver.sponsor = async () => {
+  const { sponsors, applications, current } = await loadSponsorPage();
+  const pending = applications.some(a=>a.status==="PENDING");
+  const canApply = !current && !pending && sponsors.length > 0;
+  const why = current ? "You already have a sponsor. Drivers can only be with one sponsor at a time."
+            : pending ? "You already have an application waiting for review."
+            : !sponsors.length ? "No sponsors are accepting applications right now." : "";
+
+  const form = `<form id="applyForm" class="grid" style="gap:12px" novalidate>
+      <label class="field">Sponsor<select name="sponsor_id" required>${sponsors.map(o=>`<option value="${o.sponsor_id}">${esc(o.sponsor_name)}</option>`).join("")}</select></label>
+      <div class="grid g2" style="gap:12px">
+        <label class="field">CDL number<input type="text" name="cdl_number" maxlength="30" required autocomplete="off"></label>
+        <label class="field">CDL state<select name="cdl_state" required><option value="">Pick a state</option>${STATES.map(s=>`<option>${s}</option>`).join("")}</select></label>
+      </div>
+      <label class="field">Years of driving experience<input type="number" name="years_experience" min="0" max="70" required></label>
+      <label class="field">Anything the sponsor should know? (optional)<textarea name="notes" maxlength="500"></textarea></label>
+      <button class="btn go" id="applyBtn">Submit application</button>
+    </form>`;
+
+  const appRows = applications.map(a=>`<div class="li"><div>
+      <b>${esc(a.sponsor_name)}</b><br>
+      <span class="dim">Submitted ${fmtD(a.submitted_at)}${a.decision_at?` · Decided ${fmtD(a.decision_at)}`:""}</span>
+      ${a.rejection_reason?`<br><span class="dim">Reason: ${esc(a.rejection_reason)}</span>`:""}
+    </div>${badge(a.status)}</div>`).join("");
+
+  return `<div class="head"><div><h1>My sponsor</h1><p class="sub">Your sponsor awards your points and runs your catalog.</p></div></div>
+  <div class="grid g2">
+    <div class="panel"><h2>${current ? esc(current.name) : "No sponsor yet"}</h2>
+      ${current ? (current.email ? `<p class="dim">${esc(current.email)} · ${esc(current.phone||"")}<br>1 point = ${usd(current.rate)}</p>` : `<p class="dim">You're an active driver with this sponsor.</p>`)
+                : `<p class="dim">Apply below. A sponsor user reviews each application.</p>`}
+      <h2 style="margin-top:18px">Apply to a sponsor</h2>
+      ${canApply ? form : `<p class="dim">${esc(why)}</p>`}
+    </div>
+    <div class="panel flush"><h2>My applications</h2><div class="list">${appRows || `<div class="empty">No applications yet.</div>`}</div></div>
+  </div>
+  ${src("driver","driver_application","sponsor_organization","audit_event")}`;
+};
+
+bind.driver.sponsor = () => {
+  const f = $("#applyForm"); if (!f) return;
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const v = Object.fromEntries(new FormData(f));
+    if (!v.cdl_number.trim() || !v.cdl_state || v.years_experience === "") return toast("Fill in your CDL number, state, and years of experience.");
+    const body = { sponsor_id: +v.sponsor_id, cdl_number: v.cdl_number.trim(), cdl_state: v.cdl_state,
+                   years_experience: +v.years_experience, notes: v.notes.trim() };
+    $("#applyBtn").disabled = true;
+    if (LIVE) {
+      try { await App.api("/api/driver/applications", { method: "POST", body }); toast("Application submitted"); App.render(); }
+      catch (err) { toast(err.message); $("#applyBtn").disabled = false; }
+      return;
+    }
+    DB.driver_application.push({ application_id: nextId("driver_application","application_id"), driver_id: ME.driver,
+      sponsor_id: body.sponsor_id, decided_by_user_id: null, submitted_at: now(), status: "PENDING", decision_at: null,
+      reason: null, cdl_number: body.cdl_number.toUpperCase(), cdl_state: body.cdl_state,
+      years_experience: body.years_experience, applicant_notes: body.notes || null });
+    audit({ category: "APPLICATION", actor_user_id: ME.driver, sponsor_id: body.sponsor_id, driver_id: ME.driver,
+      subject_username: user(ME.driver).username, entity_type: "DRIVER_APPLICATION", success: true,
+      reason_or_details: `Applied to ${sponsor(body.sponsor_id).sponsor_name}` });
+    toast("Application submitted"); App.render();
+  };
+};
+
+App.start("driver", "sponsor");
+</script>
+</body>
+</html>

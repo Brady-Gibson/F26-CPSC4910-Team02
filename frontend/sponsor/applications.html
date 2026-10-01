@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Applications · TigerTruck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/app.css">
+</head>
+<body data-root="../">
+<div class="shell"><aside class="rail" id="rail"></aside><main id="main" tabindex="-1"><div class="loading">Loading…</div></main></div>
+<dialog id="dlg"><form method="dialog" class="dlg" id="dlgBody"></form></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="../assets/js/mock-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script>
+/* Driver Application Review (approve/reject is what sends the Sprint 3 application alerts)
+   LIVE: GET /api/sponsor/applications, POST /api/sponsor/applications/<id>/decision */
+
+async function loadApplications(){
+  if (LIVE) return (await App.api("/api/sponsor/applications")).applications;
+  return DB.driver_application.filter(a=>a.sponsor_id===mySponsor())
+    .sort((a,b)=>(a.status==="PENDING"?-1:1)-(b.status==="PENDING"?-1:1) || b.submitted_at.localeCompare(a.submitted_at))
+    .map(a=>{ const u=user(a.driver_id); return { ...a, first_name:u.first_name, last_name:u.last_name, email:u.email,
+      decided_by: a.decided_by_user_id ? uname(a.decided_by_user_id) : null }; });
+}
+
+VIEWS.sponsor.applications = async () => {
+  const apps = await loadApplications();
+  const rows = apps.map(a=>`<tr>
+    <td><b>${esc(a.first_name)} ${esc(a.last_name)}</b><br><span class="dim">${esc(a.email)}</span></td>
+    <td>${a.cdl_number ? `${esc(a.cdl_number)} (${esc(a.cdl_state)})<br><span class="dim">${esc(a.years_experience)} yrs experience</span>` : `<span class="dim">Not provided</span>`}
+        ${a.applicant_notes ? `<br><span class="dim">"${esc(a.applicant_notes)}"</span>` : ""}</td>
+    <td>${fmtD(a.submitted_at)}</td>
+    <td>${badge(a.status)}${a.status!=="PENDING" && a.reason ? `<br><span class="dim">${esc(a.reason)}${a.decided_by?` · ${esc(a.decided_by)}`:""}</span>` : ""}</td>
+    <td class="num">${a.status==="PENDING" ? `<div class="row" style="justify-content:flex-end">
+      <button class="btn go sm" data-ok="${a.application_id}">Approve</button>
+      <button class="btn danger sm" data-no="${a.application_id}">Reject</button></div>` : ""}</td></tr>`).join("");
+  return `<div class="head"><div><h1>Applications</h1><p class="sub">Approving a driver makes you their sponsor and opens your catalog to them.</p></div></div>
+  <div class="panel flush"><div class="tw"><table>
+    <thead><tr><th>Driver</th><th>CDL</th><th>Submitted</th><th>Status</th><th></th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="5" class="empty">No applications yet.</td></tr>`}</tbody>
+  </table></div></div>${src("driver_application","driver","notification","audit_event")}`;
+};
+
+async function decide(id, decision, reason){
+  if (LIVE) {
+    try { await App.api(`/api/sponsor/applications/${id}/decision`, { method: "POST", body: { decision, reason } });
+          toast(decision==="APPROVE" ? "Application approved" : "Application rejected"); App.render(); }
+    catch (e) { toast(e.message); }
+    return;
+  }
+  const a = DB.driver_application.find(x=>x.application_id===id), ok = decision==="APPROVE", org = sponsor(a.sponsor_id);
+  Object.assign(a, { status: ok?"APPROVED":"REJECTED", decided_by_user_id: ME.sponsor, decision_at: now(), reason: reason || "Application approved" });
+  if (ok) Object.assign(driver(a.driver_id), { sponsor_id: a.sponsor_id, participation_status: "ACTIVE", joined_at: now() });
+  DB.notification.push({ notification_id: nextId("notification","notification_id"), user_id: a.driver_id,
+    notification_type: ok?"APPLICATION_APPROVED":"APPLICATION_REJECTED", is_read: false, created_at: now(),
+    message: ok ? `Your application to ${org.sponsor_name} was approved. You can start earning points now.`
+                : `Your application to ${org.sponsor_name} was not approved. Reason: ${reason}` });
+  audit({ category:"APPLICATION", actor_user_id: ME.sponsor, sponsor_id: a.sponsor_id, driver_id: a.driver_id,
+    subject_username: user(a.driver_id).username, entity_type: "DRIVER_APPLICATION", entity_id: id, success: true,
+    reason_or_details: `Application ${ok?"approved":"rejected"}: ${a.reason}` });
+  toast(ok ? "Application approved" : "Application rejected"); App.render();
+}
+
+function rejectDialog(id){
+  $("#dlgBody").innerHTML = `<h2>Reject application</h2>
+    <label class="field">Reason (the driver sees this)<textarea id="why" maxlength="500" required placeholder="e.g. We need at least 2 years of experience"></textarea></label>
+    <div class="row" style="justify-content:flex-end"><button class="btn ghost" value="cancel" formnovalidate>Cancel</button><button class="btn danger" value="ok">Reject</button></div>`;
+  const dlg = $("#dlg"); dlg.showModal();
+  dlg.onclose = () => { if (dlg.returnValue !== "ok") return; const why = $("#why").value.trim();
+    if (!why) return toast("Give a reason so the driver knows why."); decide(id, "REJECT", why); };
+}
+
+bind.sponsor.applications = () => {
+  document.querySelectorAll("[data-ok]").forEach(b => b.onclick = () => decide(+b.dataset.ok, "APPROVE", ""));
+  document.querySelectorAll("[data-no]").forEach(b => b.onclick = () => rejectDialog(+b.dataset.no));
+};
+
+App.start("sponsor", "applications");
+</script>
+</body>
+</html>
