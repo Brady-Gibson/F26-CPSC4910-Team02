@@ -16,14 +16,46 @@
 <script src="../assets/js/mock-data.js"></script>
 <script src="../assets/js/app.js"></script>
 <script>
-VIEWS.admin.sponsors = () => `<div class="head"><div><h1>Sponsors</h1><p class="sub">Organizations using the program.</p></div><button class="btn go">Add sponsor</button></div>
+VIEWS.admin.sponsors = () => `<div class="head"><div><h1>Sponsors</h1><p class="sub">Organizations using the program.</p></div><button class="btn go" id="addSponsor">Add sponsor</button></div>
   <div class="panel flush"><div class="tw"><table><thead><tr><th>Sponsor</th><th>Status</th><th class="num">Drivers</th><th class="num">Sponsor users</th><th class="num">1 point</th><th class="num">Points outstanding</th><th></th></tr></thead><tbody>
   ${DB.sponsor_organization.map(s=>{const ds=DB.driver.filter(d=>d.sponsor_id===s.sponsor_id&&d.participation_status==="ACTIVE");
     return `<tr><td><b>${esc(s.sponsor_name)}</b><br><span class="dim">${esc(s.contact_email)}</span></td><td>${badge(s.status)}</td><td class="num">${ds.length}</td><td class="num">${DB.sponsor_user.filter(u=>u.sponsor_id===s.sponsor_id).length}</td><td class="num">${usd(s.point_dollar_rate)}</td>
     <td class="num">${n(ds.reduce((a,d)=>a+d.current_points,0))}</td><td class="num"><button class="btn ghost sm" data-st="${s.sponsor_id}">${s.status==="ACTIVE"?"Deactivate":"Activate"}</button></td></tr>`;}).join("")}
   </tbody></table></div></div>${src("sponsor_organization","driver","sponsor_user")}`;
 
-bind.admin.sponsors = () => document.querySelectorAll("[data-st]").forEach(b=>b.onclick=()=>{const s=sponsor(+b.dataset.st); s.status=s.status==="ACTIVE"?"INACTIVE":"ACTIVE"; toast(`${s.sponsor_name} ${s.status.toLowerCase()}`); App.render();});
+bind.admin.sponsors = () => {
+  document.querySelectorAll("[data-st]").forEach(b=>b.onclick=()=>{const s=sponsor(+b.dataset.st); s.status=s.status==="ACTIVE"?"INACTIVE":"ACTIVE"; toast(`${s.sponsor_name} ${s.status.toLowerCase()}`); App.render();});
+  $("#addSponsor").onclick = addSponsorDialog;
+};
+
+// POST /api/admin/sponsors. The dialog stays open on an error so the admin can fix the form.
+function addSponsorDialog(){
+  const form = $("#dlgBody"), dlg = $("#dlg");
+  form.innerHTML = `<h2 style="margin:0">Add sponsor</h2>
+    <label class="field">Company name<input type="text" id="spName" maxlength="100" required></label>
+    <label class="field">Contact email<input type="text" id="spEmail" maxlength="100" placeholder="optional"></label>
+    <label class="field">Phone<input type="text" id="spPhone" maxlength="20" placeholder="optional"></label>
+    <label class="field">Dollar value of 1 point<input type="number" id="spRate" min="0.01" max="1000" step="0.01" value="0.01" required></label>
+    <p id="spErr" role="alert" style="margin:0;color:var(--red)"></p>
+    <div class="row" style="justify-content:flex-end"><button class="btn ghost" value="cancel" formnovalidate>Cancel</button><button class="btn go" value="ok">Create sponsor</button></div>`;
+  form.onsubmit = async e => {
+    if (e.submitter?.value !== "ok") return;
+    e.preventDefault();
+    const body = { sponsor_name: $("#spName").value.trim(), contact_email: $("#spEmail").value.trim(),
+                   phone: $("#spPhone").value.trim(), point_dollar_rate: $("#spRate").value };
+    e.submitter.disabled = true;
+    try {
+      if (LIVE) await App.api("/api/admin/sponsors", { method: "POST", body });
+      else DB.sponsor_organization.push({ sponsor_id: nextId("sponsor_organization","sponsor_id"), sponsor_name: body.sponsor_name,
+        status: "ACTIVE", point_dollar_rate: +body.point_dollar_rate, contact_email: body.contact_email || null, phone: body.phone || null, created_at: now() });
+      form.onsubmit = null; dlg.close();
+      toast(`${body.sponsor_name} added`);
+      App.refresh();
+    } catch (err) { $("#spErr").textContent = err.message; e.submitter.disabled = false; }
+  };
+  dlg.showModal();
+  $("#spName").focus();
+}
 
 App.start("admin", "sponsors");
 </script>
