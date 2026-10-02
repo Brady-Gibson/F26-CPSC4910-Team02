@@ -91,7 +91,8 @@ def health():
 @application.route("/api/about")
 def about():
     result = query(
-        """SELECT team_number, version_number, release_date, product_name, product_description
+        """SELECT team_number, version_number, release_date, product_name, product_description,
+                  NOW() AS db_time
              FROM ABOUT_RELEASE
             WHERE team_number = 2
             ORDER BY release_id DESC
