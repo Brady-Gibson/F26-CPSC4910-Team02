@@ -6,6 +6,10 @@ Protect any route with:
     @require_role("sponsor")          # or "driver", "admin", or several: require_role("sponsor", "admin")
     def something():
         g.user["user_id"], g.user["role"], g.user["sponsor_id"]   # who is calling
+
+View as: an admin can view the site as a driver or sponsor user (POST /api/view-as, /api/view-as/stop).
+While viewing, g.user is that driver or sponsor, g.viewed_by is the real admin, and require_role
+blocks anything but GET, so viewing is read-only.
 """
 from functools import wraps
 
@@ -18,6 +22,8 @@ from db import query, transaction
 bp = Blueprint("auth", __name__, url_prefix="/api")
 
 MAX_FAILED_LOGINS = 5
+VIEW_AS_ROLES = ("driver", "sponsor")
+READ_ONLY_METHODS = ("GET", "HEAD", "OPTIONS")
 # Compared against when the username doesn't exist, so a wrong username takes as long as a wrong password.
 _DUMMY_HASH = generate_password_hash("not-a-real-password")
 
@@ -41,13 +47,17 @@ def load_user(user_id):
     return u
 
 
-def public_user(u):
-    return {k: u[k] for k in ("user_id", "username", "first_name", "last_name", "email",
-                              "role", "sponsor_id", "sponsor_name")}
+def public_user(u, viewed_by=None):
+    out = {k: u[k] for k in ("user_id", "username", "first_name", "last_name", "email",
+                             "role", "sponsor_id", "sponsor_name")}
+    if viewed_by:
+        out["viewed_by"] = {k: viewed_by[k] for k in ("user_id", "first_name", "last_name")}
+    return out
 
 
 def current_user():
-    """The signed-in user, re-checked against the DB so locked accounts lose access right away."""
+    """The signed-in user, re-checked against the DB so locked accounts lose access right away.
+    While an admin is viewing as someone, this returns that someone and sets g.viewed_by to the admin."""
     if "user" in g:
         return g.user
     uid = session.get("user_id")
@@ -57,6 +67,14 @@ def current_user():
     if u is None or u["account_status"] != "ACTIVE" or u["role"] is None:
         session.clear()
         return None
+    g.viewed_by = None
+    target_id = session.get("view_as")
+    if target_id is not None:
+        target = load_user(target_id) if u["role"] == "admin" else None
+        if target is None or target["role"] not in VIEW_AS_ROLES:
+            session.pop("view_as", None)
+        else:
+            g.viewed_by, u = u, target
     g.user = u
     return u
 
@@ -68,6 +86,9 @@ def require_role(*roles):
             u = current_user()
             if u is None:
                 return jsonify(error="Please sign in."), 401
+            if g.viewed_by and request.method not in READ_ONLY_METHODS:
+                return jsonify(error=f"You're viewing as {u['first_name']} {u['last_name']}, "
+                                     "so changes are turned off."), 403
             if roles and u["role"] not in roles:
                 return jsonify(error="You don't have access to that."), 403
             return view(*args, **kwargs)
@@ -145,6 +166,7 @@ def login():
 def logout():
     u = current_user()
     if u:
+        u = g.viewed_by or u  # signing out while viewing as someone signs out the admin
         with transaction() as cur:
             log_audit(cur, "LOGOUT", True, actor_user_id=u["user_id"], subject_username=u["username"],
                       details="Signed out")
@@ -157,4 +179,47 @@ def me():
     u = current_user()
     if u is None:
         return jsonify(error="Please sign in."), 401
-    return jsonify(user=public_user(u))
+    return jsonify(user=public_user(u, g.viewed_by))
+
+
+@bp.post("/view-as")
+def start_view_as():
+    """Admin only: see the site as a driver or sponsor user. Body: {"user_id": ...}."""
+    u = current_user()
+    if u is None:
+        return jsonify(error="Please sign in."), 401
+    admin = g.viewed_by or u
+    if admin["role"] != "admin":
+        return jsonify(error="You don't have access to that."), 403
+    try:
+        target_id = int((request.get_json(silent=True) or {}).get("user_id"))
+    except (TypeError, ValueError):
+        return jsonify(error="Pick a user to view as."), 400
+    target = load_user(target_id)
+    if target is None:
+        return jsonify(error="User not found."), 404
+    if target["role"] not in VIEW_AS_ROLES:
+        return jsonify(error="You can only view as a driver or sponsor user."), 400
+
+    with transaction() as cur:
+        log_audit(cur, "VIEW_AS", True, actor_user_id=admin["user_id"], sponsor_id=target["sponsor_id"],
+                  driver_id=target["user_id"] if target["role"] == "driver" else None,
+                  subject_username=target["username"], entity_type="USER_ACCOUNT", entity_id=target["user_id"],
+                  details=f"Started viewing as {target['role']} {target['username']}")
+    session["view_as"] = target["user_id"]
+    return jsonify(ok=True, user=public_user(target, admin))
+
+
+@bp.post("/view-as/stop")
+def stop_view_as():
+    u = current_user()
+    if u is None:
+        return jsonify(error="Please sign in."), 401
+    admin = g.viewed_by
+    if admin:
+        with transaction() as cur:
+            log_audit(cur, "VIEW_AS", True, actor_user_id=admin["user_id"], subject_username=u["username"],
+                      entity_type="USER_ACCOUNT", entity_id=u["user_id"],
+                      details=f"Stopped viewing as {u['role']} {u['username']}")
+        session.pop("view_as", None)
+    return jsonify(ok=True, user=public_user(admin or u))

@@ -252,6 +252,37 @@ async function loadBootstrap(){
   try { const r = await fetch("/api/bootstrap", { credentials: "same-origin" }); if (r.ok) DB = fromCols(await r.json()); } catch {}
 }
 
+// Admin "View as": POST /api/view-as, then the site behaves as that driver or sponsor user (read only)
+// until POST /api/view-as/stop. LIVE only.
+async function viewAsDialog(){
+  let users;
+  try { ({ users } = await App.api("/api/admin/users")); } catch (e) { return toast(e.message); }
+  const opts = r => users.filter(u=>u.role===r).map(u=>`<option value="${u.user_id}">${esc(u.first_name)} ${esc(u.last_name)} (${esc(u.username)})${u.account_status!=="ACTIVE"?` · ${esc(u.account_status.toLowerCase())}`:""}</option>`).join("");
+  const form = $("#dlgBody"), dlg = $("#dlg");
+  form.innerHTML = `<h2 style="margin:0">View as driver or sponsor</h2>
+    <p class="dim" style="margin:0">See the site the way they do. Changes are turned off until you go back to admin.</p>
+    <label class="field">User<select id="viewAsUser" required><option value="">Choose a user…</option>
+      <optgroup label="Drivers">${opts("driver")}</optgroup><optgroup label="Sponsor users">${opts("sponsor")}</optgroup></select></label>
+    <p id="viewAsErr" role="alert" style="margin:0;color:var(--red)"></p>
+    <div class="row" style="justify-content:flex-end"><button class="btn ghost" value="cancel" formnovalidate>Cancel</button><button class="btn go" value="ok">View as</button></div>`;
+  form.onsubmit = async e => {
+    if (e.submitter?.value !== "ok") return;
+    e.preventDefault();
+    e.submitter.disabled = true;
+    try {
+      const d = await App.api("/api/view-as", { method: "POST", body: { user_id: +$("#viewAsUser").value } });
+      location.href = ROOT + HOME[d.user.role] + ".html";
+    } catch (err) { $("#viewAsErr").textContent = err.message; e.submitter.disabled = false; }
+  };
+  dlg.onclose = () => { form.onsubmit = null; };
+  dlg.showModal();
+}
+
+async function stopViewAs(){
+  try { await App.api("/api/view-as/stop", { method: "POST" }); location.href = ROOT + HOME.admin + ".html"; }
+  catch (e) { toast(e.message); }
+}
+
 function renderRail(){
   let u, sub;
   if (App.me) {
@@ -269,9 +300,12 @@ function renderRail(){
       <svg class="shield" viewBox="0 0 40 40" aria-hidden="true"><path d="M20 2c5 3 11 3 16 1 2 13-1 27-16 35C5 30 2 16 4 3c5 2 11 2 16-1z" fill="#00694B" stroke="#fff" stroke-width="2.5"/><text x="20" y="26" text-anchor="middle" font-family="Overpass,sans-serif" font-weight="900" font-size="13" fill="#FFB81C">02</text></svg>
       TigerTruck</a>
     <div class="who"><b>${esc(u.first_name)} ${esc(u.last_name)}</b>${esc(sub)}</div>
+    ${App.me?.viewed_by ? `<div class="viewas" role="status"><b>Viewing as ${esc(u.first_name)} ${esc(u.last_name)}</b>Read only. Signed in as ${esc(App.me.viewed_by.first_name)} ${esc(App.me.viewed_by.last_name)}.
+      <button class="btn sm" id="stopViewAs">Back to admin</button></div>` : ""}
     <nav class="nav" aria-label="Main">${ROUTES[role].map(([k,l])=>{ let c; try { c=counts[role][k]?.(); } catch {}
       return `<a href="${ROOT}${role}/${k}.html" ${k===App.page?'aria-current="page"':""}>${l}${c?`<span class="count">${c}</span>`:""}</a>`; }).join("")}</nav>
     <div class="rail-foot">
+      ${LIVE && role==="admin" ? `<button class="signout" id="viewAs">View as driver or sponsor</button>` : ""}
       <button class="signout" id="signOut">Sign out</button>
       <label><input type="checkbox" id="srcToggle" ${document.body.classList.contains("show-src")?"checked":""}> Show data sources</label>
       <label><input type="checkbox" id="darkToggle" ${dark?"checked":""}> Dark theme</label>
@@ -279,6 +313,8 @@ function renderRail(){
       ${LIVE ? "" : `<button class="linkbtn" id="resetDemo">Reset demo data</button>`}
     </div>`;
   $("#signOut").onclick = App.logout;
+  if ($("#viewAs")) $("#viewAs").onclick = viewAsDialog;
+  if ($("#stopViewAs")) $("#stopViewAs").onclick = stopViewAs;
   if ($("#resetDemo")) $("#resetDemo").onclick = App.resetDemo;
   $("#srcToggle").onchange = e => { document.body.classList.toggle("show-src", e.target.checked); pref.set("tt_src", e.target.checked ? "1" : "0"); };
   $("#darkToggle").onchange = e => { const t = e.target.checked ? "dark" : "light"; document.documentElement.dataset.theme = t; pref.set("tt_theme", t); };
