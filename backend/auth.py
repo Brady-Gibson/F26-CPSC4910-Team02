@@ -16,6 +16,7 @@ from functools import wraps
 from flask import Blueprint, g, jsonify, request, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from accounts import AccountError, create_user
 from audit import log_audit
 from db import query, transaction
 
@@ -107,6 +108,38 @@ def _failed_since_last_success(cur, username):
               AND audit_event_id > %s""", (username, last_ok))
     return cur.fetchone()["fails"]
 
+@bp.post("/register/driver")
+def register_driver():
+    data = request.get_json(silent=True) or {}
+
+    password = str(data.get("password") or "")
+    confirm_password = str(data.get("confirm_password") or "")
+
+    if password != confirm_password:
+        return jsonify(error="Passwords do not match."), 400
+
+    try:
+        with transaction() as cur:
+            user_id = create_user(
+                cur,
+                "driver",
+                username=data.get("username"),
+                password=password,
+                first_name=data.get("first_name"),
+                last_name=data.get("last_name"),
+                email=data.get("email"),
+                phone=data.get("phone"),
+                sponsor_id=None,
+                created_by=None,
+            )
+    except AccountError as e:
+        return jsonify(error=str(e)), 400
+
+    return jsonify(
+        ok=True,
+        user_id=user_id,
+        message="Driver account created. You can now sign in.",
+    ), 201
 
 @bp.post("/login")
 def login():
