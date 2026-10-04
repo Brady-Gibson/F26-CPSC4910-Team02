@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Catalog · TigerTruck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/app.css">
+</head>
+<body data-root="../">
+<div class="shell"><aside class="rail" id="rail"></aside><main id="main" tabindex="-1"><div class="loading">Loading…</div></main></div>
+<dialog id="dlg"><form method="dialog" class="dlg" id="dlgBody"></form></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="../assets/js/mock-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script>
+VIEWS.sponsor.catalog = () => {
+  const s=sponsor(mySponsor());
+  return `<div class="head"><div><h1>Catalog</h1><p class="sub">Pick products from the store feed. Point prices start at dollar price ÷ ${usd(s.point_dollar_rate)} and you can override them.</p></div></div>
+  <div class="panel flush"><div class="tw"><table><thead><tr><th>Product</th><th>Stock</th><th class="num">Store price</th><th class="num">Point price</th><th>In catalog</th></tr></thead><tbody>
+  ${DB.product.map(p=>{const ci=DB.catalog_item.find(c=>c.sponsor_id===s.sponsor_id&&c.product_id===p.product_id);
+    const sugg=Math.ceil(p.dollar_price/s.point_dollar_rate-1e-9);
+    return `<tr><td><b>${esc(p.product_name)}</b><br><span class="dim">${esc(p.category)} · ${esc(p.external_product_id)}</span></td><td>${badge(p.availability)}</td><td class="num">${usd(p.dollar_price)}</td>
+    <td class="num"><input type="number" style="width:100px;text-align:right" data-price="${p.product_id}" value="${ci?ci.point_price:sugg}" aria-label="Point price"></td>
+    <td><input type="checkbox" data-in="${p.product_id}" ${ci&&ci.is_active?"checked":""} aria-label="Show in catalog"></td></tr>`;}).join("")}
+  </tbody></table></div></div>${src("product","catalog_item")}`;
+};
+
+bind.sponsor.catalog = () => {
+  const sid=mySponsor(), up=(pid,patch)=>{let ci=DB.catalog_item.find(c=>c.sponsor_id===sid&&c.product_id===pid);
+    if(!ci){ci={sponsor_id:sid,product_id:pid,point_price:+document.querySelector(`[data-price="${pid}"]`).value,is_active:false,added_at:now()};DB.catalog_item.push(ci);} Object.assign(ci,patch);};
+  document.querySelectorAll("[data-in]").forEach(c=>c.onchange=()=>{up(+c.dataset.in,{is_active:c.checked}); toast(c.checked?"Added to catalog":"Hidden from catalog");});
+  document.querySelectorAll("[data-price]").forEach(i=>i.onchange=()=>{up(+i.dataset.price,{point_price:+i.value}); toast("Point price saved");});
+};
+
+App.start("sponsor", "catalog");
+</script>
+</body>
+</html>
