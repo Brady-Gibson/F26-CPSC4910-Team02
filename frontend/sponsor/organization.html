@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Organization · TigerTruck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/app.css">
+</head>
+<body data-root="../">
+<div class="shell"><aside class="rail" id="rail"></aside><main id="main" tabindex="-1"><div class="loading">Loading…</div></main></div>
+<dialog id="dlg"><form method="dialog" class="dlg" id="dlgBody"></form></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="../assets/js/mock-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script>
+VIEWS.sponsor.organization = () => { const s=sponsor(mySponsor()), team=DB.sponsor_user.filter(x=>x.sponsor_id===s.sponsor_id);
+  return `<div class="head"><div><h1>${esc(s.sponsor_name)}</h1><p class="sub">Organization settings and your sponsor team.</p></div></div>
+  <div class="grid g2"><div class="panel"><div class="grid" style="gap:12px">
+    <label class="field">Dollar value of 1 point<input type="number" step="0.01" min="0.01" id="rate" value="${s.point_dollar_rate}"></label>
+    <label class="field">Contact email<input type="text" id="ce" value="${esc(s.contact_email)}"></label>
+    <label class="field">Phone<input type="text" id="cp" value="${esc(s.phone)}"></label>
+    <button class="btn go" id="saveO">Save changes</button></div>${src("sponsor_organization")}</div>
+  <div class="panel flush"><h2>Team</h2><div class="list">${team.map(t=>{const u=user(t.sponsor_user_id); return `<div class="li"><div><b>${esc(u.first_name)} ${esc(u.last_name)}</b><br><span class="dim">${esc(t.job_title)} · ${esc(u.email)}</span></div>${badge(u.account_status)}</div>`;}).join("")}</div>
+  <div style="padding:0 18px 16px"><button class="btn ghost">Invite sponsor user</button>${src("sponsor_user","user_account")}</div></div></div>`; };
+
+bind.sponsor.organization = () => { $("#saveO").onclick=()=>{const s=sponsor(mySponsor()); s.point_dollar_rate=+$("#rate").value; s.contact_email=$("#ce").value; s.phone=$("#cp").value; toast("Changes saved");}; };
+
+App.start("sponsor", "organization");
+</script>
+</body>
+</html>
