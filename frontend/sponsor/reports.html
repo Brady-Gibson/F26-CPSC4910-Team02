@@ -16,16 +16,26 @@
 <script src="../assets/js/mock-data.js"></script>
 <script src="../assets/js/app.js"></script>
 <script>
-VIEWS.sponsor.reports = () => {
+/* LIVE: GET /api/sponsor/reports. Purchases and refunds are left out (told apart by reason text). */
+
+function mockReports(){
   const sid=mySponsor(), tx=DB.point_transaction.filter(t=>t.sponsor_id===sid&&!/redeemed|refund|purchase/i.test(t.reason));
-  const per={}; tx.forEach(t=>{per[t.driver_id]??={up:0,down:0}; t.points_delta>0?per[t.driver_id].up+=t.points_delta:per[t.driver_id].down-=t.points_delta;});
-  const max=Math.max(1,...Object.values(per).map(p=>p.up));
-  const up=tx.filter(t=>t.points_delta>0).reduce((a,t)=>a+t.points_delta,0), down=tx.filter(t=>t.points_delta<0).reduce((a,t)=>a-t.points_delta,0);
+  const per={}; tx.forEach(t=>{per[t.driver_id]??={driver_id:t.driver_id,driver_name:uname(t.driver_id),awarded:0,deducted:0};
+    t.points_delta>0?per[t.driver_id].awarded+=t.points_delta:per[t.driver_id].deducted-=t.points_delta;});
+  return { awarded: tx.filter(t=>t.points_delta>0).reduce((a,t)=>a+t.points_delta,0),
+           deducted: tx.filter(t=>t.points_delta<0).reduce((a,t)=>a-t.points_delta,0),
+           redeemed: DB.customer_order.filter(o=>o.sponsor_id===sid&&o.status!=="CANCELLED").reduce((a,o)=>a+o.total_points,0),
+           per_driver: Object.values(per).sort((a,b)=>b.awarded-a.awarded), recent: [...tx].sort(byNewest).slice(0,8) };
+}
+
+VIEWS.sponsor.reports = async () => {
+  const r = LIVE ? await App.api("/api/sponsor/reports") : mockReports();
+  const max = Math.max(1, ...r.per_driver.map(p=>p.awarded));
   return `<div class="head"><div><h1>Reports</h1><p class="sub">Point activity for your drivers. Export buttons come later.</p></div></div>
-  <div class="grid g3" style="margin-bottom:18px"><div class="panel"><div class="dim">Awarded</div><div class="stat plus">+${n(up)}</div></div><div class="panel"><div class="dim">Deducted</div><div class="stat minus">−${n(down)}</div></div>
-  <div class="panel"><div class="dim">Redeemed</div><div class="stat">${n(DB.customer_order.filter(o=>o.sponsor_id===sid&&o.status!=="CANCELLED").reduce((a,o)=>a+o.total_points,0))}</div></div></div>
-  <div class="grid g2"><div class="panel"><h2>Awarded by driver</h2>${Object.entries(per).map(([d,p])=>`<div style="margin-bottom:10px"><div class="row spread"><span>${esc(uname(+d))}</span><span class="dim">+${n(p.up)} / −${n(p.down)}</span></div><div class="bar"><i style="width:${p.up/max*100}%"></i></div></div>`).join("")}</div>
-  <div class="panel flush"><h2>Audit trail</h2>${txTable(tx.sort(byNewest).slice(0,8),true)}</div></div>${src("point_transaction","customer_order","audit_event")}`;
+  <div class="grid g3" style="margin-bottom:18px"><div class="panel"><div class="dim">Awarded</div><div class="stat plus">+${n(r.awarded)}</div></div><div class="panel"><div class="dim">Deducted</div><div class="stat minus">−${n(r.deducted)}</div></div>
+  <div class="panel"><div class="dim">Redeemed</div><div class="stat">${n(r.redeemed)}</div></div></div>
+  <div class="grid g2"><div class="panel"><h2>Awarded by driver</h2>${r.per_driver.map(p=>`<div style="margin-bottom:10px"><div class="row spread"><span>${esc(p.driver_name)}</span><span class="dim">+${n(p.awarded)} / −${n(p.deducted)}</span></div><div class="bar"><i style="width:${p.awarded/max*100}%"></i></div></div>`).join("") || `<p class="dim">No point activity yet.</p>`}</div>
+  <div class="panel flush"><h2>Audit trail</h2>${txTable(r.recent,true)}</div></div>${src("point_transaction","customer_order")}`;
 };
 
 App.start("sponsor", "reports");

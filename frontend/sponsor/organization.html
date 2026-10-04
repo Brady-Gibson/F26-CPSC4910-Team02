@@ -16,17 +16,38 @@
 <script src="../assets/js/mock-data.js"></script>
 <script src="../assets/js/app.js"></script>
 <script>
-VIEWS.sponsor.organization = () => { const s=sponsor(mySponsor()), team=DB.sponsor_user.filter(x=>x.sponsor_id===s.sponsor_id);
+/* LIVE: GET /api/sponsor/organization, PATCH /api/sponsor/organization {point_dollar_rate, contact_email, phone}
+   "Invite sponsor user" has no endpoint yet (sponsor-user creation is on the roadmap). */
+
+function mockOrganization(){
+  const s = sponsor(mySponsor());
+  return { organization: s, team: DB.sponsor_user.filter(x=>x.sponsor_id===s.sponsor_id).map(t=>{ const u=user(t.sponsor_user_id);
+    return { ...t, first_name:u.first_name, last_name:u.last_name, email:u.email, account_status:u.account_status }; }) };
+}
+
+VIEWS.sponsor.organization = async () => {
+  const { organization: s, team } = LIVE ? await App.api("/api/sponsor/organization") : mockOrganization();
   return `<div class="head"><div><h1>${esc(s.sponsor_name)}</h1><p class="sub">Organization settings and your sponsor team.</p></div></div>
   <div class="grid g2"><div class="panel"><div class="grid" style="gap:12px">
     <label class="field">Dollar value of 1 point<input type="number" step="0.01" min="0.01" id="rate" value="${s.point_dollar_rate}"></label>
-    <label class="field">Contact email<input type="text" id="ce" value="${esc(s.contact_email)}"></label>
-    <label class="field">Phone<input type="text" id="cp" value="${esc(s.phone)}"></label>
+    <label class="field">Contact email<input type="email" id="ce" value="${esc(s.contact_email)}"></label>
+    <label class="field">Phone<input type="tel" id="cp" value="${esc(s.phone)}"></label>
     <button class="btn go" id="saveO">Save changes</button></div>${src("sponsor_organization")}</div>
-  <div class="panel flush"><h2>Team</h2><div class="list">${team.map(t=>{const u=user(t.sponsor_user_id); return `<div class="li"><div><b>${esc(u.first_name)} ${esc(u.last_name)}</b><br><span class="dim">${esc(t.job_title)} · ${esc(u.email)}</span></div>${badge(u.account_status)}</div>`;}).join("")}</div>
-  <div style="padding:0 18px 16px"><button class="btn ghost">Invite sponsor user</button>${src("sponsor_user","user_account")}</div></div></div>`; };
+  <div class="panel flush"><h2>Team</h2><div class="list">${team.map(t=>`<div class="li"><div><b>${esc(t.first_name)} ${esc(t.last_name)}</b><br><span class="dim">${t.job_title?esc(t.job_title)+" · ":""}${esc(t.email)}</span></div>${badge(t.account_status)}</div>`).join("")}</div>
+  <div style="padding:0 18px 16px"><button class="btn ghost" disabled title="Coming soon">Invite sponsor user</button>${src("sponsor_user","user_account")}</div></div></div>`;
+};
 
-bind.sponsor.organization = () => { $("#saveO").onclick=()=>{const s=sponsor(mySponsor()); s.point_dollar_rate=+$("#rate").value; s.contact_email=$("#ce").value; s.phone=$("#cp").value; toast("Changes saved");}; };
+async function saveOrganization(){
+  const body = { point_dollar_rate: $("#rate").value.trim(), contact_email: $("#ce").value.trim(), phone: $("#cp").value.trim() };
+  if (LIVE) {
+    try { await App.api("/api/sponsor/organization", { method: "PATCH", body }); toast("Changes saved"); App.render(); }
+    catch (e) { toast(e.message); }
+    return;
+  }
+  Object.assign(sponsor(mySponsor()), { ...body, point_dollar_rate: +body.point_dollar_rate }); toast("Changes saved");
+}
+
+bind.sponsor.organization = () => { $("#saveO").onclick = saveOrganization; };
 
 App.start("sponsor", "organization");
 </script>
