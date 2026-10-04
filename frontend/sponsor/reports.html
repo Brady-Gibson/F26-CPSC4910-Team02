@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Reports · TigerTruck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/app.css">
+</head>
+<body data-root="../">
+<div class="shell"><aside class="rail" id="rail"></aside><main id="main" tabindex="-1"><div class="loading">Loading…</div></main></div>
+<dialog id="dlg"><form method="dialog" class="dlg" id="dlgBody"></form></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="../assets/js/mock-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script>
+VIEWS.sponsor.reports = () => {
+  const sid=mySponsor(), tx=DB.point_transaction.filter(t=>t.sponsor_id===sid&&!/redeemed|refund|purchase/i.test(t.reason));
+  const per={}; tx.forEach(t=>{per[t.driver_id]??={up:0,down:0}; t.points_delta>0?per[t.driver_id].up+=t.points_delta:per[t.driver_id].down-=t.points_delta;});
+  const max=Math.max(1,...Object.values(per).map(p=>p.up));
+  const up=tx.filter(t=>t.points_delta>0).reduce((a,t)=>a+t.points_delta,0), down=tx.filter(t=>t.points_delta<0).reduce((a,t)=>a-t.points_delta,0);
+  return `<div class="head"><div><h1>Reports</h1><p class="sub">Point activity for your drivers. Export buttons come later.</p></div></div>
+  <div class="grid g3" style="margin-bottom:18px"><div class="panel"><div class="dim">Awarded</div><div class="stat plus">+${n(up)}</div></div><div class="panel"><div class="dim">Deducted</div><div class="stat minus">−${n(down)}</div></div>
+  <div class="panel"><div class="dim">Redeemed</div><div class="stat">${n(DB.customer_order.filter(o=>o.sponsor_id===sid&&o.status!=="CANCELLED").reduce((a,o)=>a+o.total_points,0))}</div></div></div>
+  <div class="grid g2"><div class="panel"><h2>Awarded by driver</h2>${Object.entries(per).map(([d,p])=>`<div style="margin-bottom:10px"><div class="row spread"><span>${esc(uname(+d))}</span><span class="dim">+${n(p.up)} / −${n(p.down)}</span></div><div class="bar"><i style="width:${p.up/max*100}%"></i></div></div>`).join("")}</div>
+  <div class="panel flush"><h2>Audit trail</h2>${txTable(tx.sort(byNewest).slice(0,8),true)}</div></div>${src("point_transaction","customer_order","audit_event")}`;
+};
+
+App.start("sponsor", "reports");
+</script>
+</body>
+</html>
