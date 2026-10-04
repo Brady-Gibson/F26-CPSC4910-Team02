@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Drivers · TigerTruck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/app.css">
+</head>
+<body data-root="../">
+<div class="shell"><aside class="rail" id="rail"></aside><main id="main" tabindex="-1"><div class="loading">Loading…</div></main></div>
+<dialog id="dlg"><form method="dialog" class="dlg" id="dlgBody"></form></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="../assets/js/mock-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script>
+VIEWS.sponsor.drivers = () => {
+  const s=sponsor(mySponsor()), ds=DB.driver.filter(d=>d.sponsor_id===s.sponsor_id);
+  return `<div class="head"><div><h1>Drivers</h1><p class="sub">${ds.filter(d=>d.participation_status==="ACTIVE").length} active drivers at ${esc(s.sponsor_name)}. 1 point = ${usd(s.point_dollar_rate)}.</p></div>
+    <input type="search" id="dq" placeholder="Search drivers" aria-label="Search drivers"></div>
+  <div class="panel flush"><div class="tw"><table><thead><tr><th>Driver</th><th>Status</th><th>Joined</th><th class="num">Points</th><th class="num">Value</th><th></th></tr></thead><tbody>
+  ${ds.map(d=>{const u=user(d.driver_id); return `<tr data-row="${esc((u.first_name+" "+u.last_name+" "+u.username).toLowerCase())}"><td><b>${esc(u.first_name)} ${esc(u.last_name)}</b><br><span class="dim">${esc(u.username)}</span></td>
+    <td>${badge(d.participation_status)}${u.account_status!=="ACTIVE"?" "+badge(u.account_status):""}</td><td>${fmtD(d.joined_at)}</td><td class="num"><b>${n(d.current_points)}</b></td><td class="num">${usd(d.current_points*s.point_dollar_rate)}</td>
+    <td class="num"><div class="row" style="justify-content:flex-end">${d.participation_status==="ACTIVE"?`<button class="btn go sm" data-adj="${d.driver_id}">Adjust points</button><button class="btn danger sm" data-drop="${d.driver_id}">Drop</button>`:""}</div></td></tr>`;}).join("")}
+  </tbody></table></div></div>${src("driver","user_account","point_transaction","notification","audit_event")}`;
+};
+
+bind.sponsor.drivers = () => {
+  $("#dq").oninput=e=>document.querySelectorAll("[data-row]").forEach(r=>r.hidden=!r.dataset.row.includes(e.target.value.toLowerCase()));
+  document.querySelectorAll("[data-adj]").forEach(b=>b.onclick=()=>adjustDialog(+b.dataset.adj));
+  document.querySelectorAll("[data-drop]").forEach(b=>b.onclick=()=>{const d=driver(+b.dataset.drop);
+    if(!confirm(`Drop ${uname(d.driver_id)}? Their ${n(d.current_points)} points will be forfeited.`)) return;
+    if(d.current_points) addPoints(d.driver_id,d.sponsor_id,-d.current_points,"Points forfeited on program drop",ME.sponsor);
+    d.participation_status="DROPPED";
+    DB.notification.push({notification_id:nextId("notification","notification_id"),user_id:d.driver_id,notification_type:"DROPPED",message:`You were dropped from ${sponsor(d.sponsor_id).sponsor_name}.`,is_read:false,created_at:now()});
+    toast(`${uname(d.driver_id)} dropped`); App.render();});
+};
+
+App.start("sponsor", "drivers");
+</script>
+</body>
+</html>
