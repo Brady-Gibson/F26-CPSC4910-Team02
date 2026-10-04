@@ -16,23 +16,54 @@
 <script src="../assets/js/mock-data.js"></script>
 <script src="../assets/js/app.js"></script>
 <script>
-VIEWS.sponsor.schedules = () => {
-  const sid=mySponsor(), rs=DB.recurring_point_schedule.filter(r=>r.sponsor_id===sid), ds=DB.driver.filter(d=>d.sponsor_id===sid&&d.participation_status==="ACTIVE");
+/* LIVE: GET/POST /api/sponsor/schedules, POST /api/sponsor/schedules/<id>/active
+   Note: nothing runs the schedules yet (no background job), so awards don't post on their own. */
+
+function mockSchedules(){
+  const sid = mySponsor(), named = r => { const u=user(r.driver_id); return { ...r, first_name:u.first_name, last_name:u.last_name }; };
+  return { schedules: DB.recurring_point_schedule.filter(r=>r.sponsor_id===sid).map(named),
+           drivers: DB.driver.filter(d=>d.sponsor_id===sid&&d.participation_status==="ACTIVE").map(named) };
+}
+
+VIEWS.sponsor.schedules = async () => {
+  const { schedules: rs, drivers: ds } = LIVE ? await App.api("/api/sponsor/schedules") : mockSchedules();
   return `<div class="head"><div><h1>Recurring points</h1><p class="sub">Award points on a schedule instead of by hand.</p></div></div>
   <div class="grid g2"><div class="panel flush"><div class="tw"><table><thead><tr><th>Driver</th><th>Reason</th><th>Every</th><th class="num">Points</th><th>Next run</th><th></th></tr></thead><tbody>
-  ${rs.map(r=>`<tr><td>${esc(uname(r.driver_id))}</td><td>${esc(r.reason)}</td><td>${esc(r.frequency.toLowerCase())}</td><td class="num plus">+${n(r.points_amount)}</td><td>${r.is_active?fmtD(r.next_run_at):badge("INACTIVE")}</td>
-   <td><button class="btn ghost sm" data-tog="${r.schedule_id}">${r.is_active?"Pause":"Resume"}</button></td></tr>`).join("")||`<tr><td colspan="6" class="empty">No schedules yet.</td></tr>`}</tbody></table></div></div>
-  <div class="panel"><h2>New schedule</h2><div class="grid" style="gap:12px">
-    <label class="field">Driver<select id="sd">${ds.map(d=>`<option value="${d.driver_id}">${esc(uname(d.driver_id))}</option>`).join("")}</select></label>
+  ${rs.map(r=>`<tr><td>${esc(r.first_name)} ${esc(r.last_name)}</td><td>${esc(r.reason)}</td><td>${esc(r.frequency.toLowerCase())}</td><td class="num plus">+${n(r.points_amount)}</td><td>${r.is_active?fmtD(r.next_run_at):badge("INACTIVE")}</td>
+   <td><button class="btn ghost sm" data-tog="${r.schedule_id}" data-on="${r.is_active?1:0}">${r.is_active?"Pause":"Resume"}</button></td></tr>`).join("")||`<tr><td colspan="6" class="empty">No schedules yet.</td></tr>`}</tbody></table></div></div>
+  <div class="panel"><h2>New schedule</h2>${ds.length ? `<div class="grid" style="gap:12px">
+    <label class="field">Driver<select id="sd">${ds.map(d=>`<option value="${d.driver_id}">${esc(d.first_name)} ${esc(d.last_name)}</option>`).join("")}</select></label>
     <label class="field">Points<input type="number" id="sp" value="500" min="1"></label>
     <label class="field">Frequency<select id="sf"><option>WEEKLY</option><option selected>MONTHLY</option><option>DAILY</option></select></label>
     <label class="field">Reason<input type="text" id="sr" value="Monthly safe-driving bonus"></label>
-    <button class="btn go" id="addS">Create schedule</button></div>${src("recurring_point_schedule")}</div></div>`;
+    <button class="btn go" id="addS">Create schedule</button></div>` : `<p class="dim">You need at least one active driver to create a schedule.</p>`}${src("recurring_point_schedule")}</div></div>`;
 };
 
+async function toggleSchedule(id, isActive){
+  if (LIVE) {
+    try { await App.api(`/api/sponsor/schedules/${id}/active`, { method: "POST", body: { is_active: isActive } });
+          toast(isActive ? "Schedule resumed" : "Schedule paused"); App.render(); }
+    catch (e) { toast(e.message); }
+    return;
+  }
+  DB.recurring_point_schedule.find(x=>x.schedule_id===id).is_active = isActive; App.render();
+}
+
+async function createSchedule(){
+  const body = { driver_id: +$("#sd").value, points_amount: +$("#sp").value, frequency: $("#sf").value, reason: $("#sr").value.trim() };
+  if (!body.points_amount || body.points_amount < 1 || !body.reason) return toast("Enter points and a reason.");
+  if (LIVE) {
+    try { await App.api("/api/sponsor/schedules", { method: "POST", body }); toast("Schedule created"); App.render(); }
+    catch (e) { toast(e.message); }
+    return;
+  }
+  DB.recurring_point_schedule.push({schedule_id:nextId("recurring_point_schedule","schedule_id"),sponsor_id:mySponsor(),created_by_user_id:ME.sponsor,next_run_at:"2026-10-24 10:00",is_active:true,...body});
+  toast("Schedule created"); App.render();
+}
+
 bind.sponsor.schedules = () => {
-  document.querySelectorAll("[data-tog]").forEach(b=>b.onclick=()=>{const r=DB.recurring_point_schedule.find(x=>x.schedule_id===+b.dataset.tog); r.is_active=!r.is_active; App.render();});
-  $("#addS").onclick=()=>{ DB.recurring_point_schedule.push({schedule_id:nextId("recurring_point_schedule","schedule_id"),driver_id:+$("#sd").value,sponsor_id:mySponsor(),created_by_user_id:ME.sponsor,points_amount:+$("#sp").value,reason:$("#sr").value,frequency:$("#sf").value,next_run_at:"2026-10-24 10:00",is_active:true}); toast("Schedule created"); App.render(); };
+  document.querySelectorAll("[data-tog]").forEach(b=>b.onclick=()=>toggleSchedule(+b.dataset.tog, b.dataset.on!=="1"));
+  if ($("#addS")) $("#addS").onclick = createSchedule;
 };
 
 App.start("sponsor", "schedules");

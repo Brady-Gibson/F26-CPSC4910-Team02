@@ -94,7 +94,7 @@ function signHTML(d){
 function txTable(rows, showDriver, compact){
   if (!rows.length) return `<div class="empty">No point activity yet.</div>`;
   return `<div class="tw"><table><thead><tr><th>Date</th>${showDriver?"<th>Driver</th>":""}<th>Reason</th>${compact?"":"<th>By</th>"}<th class="num">Change</th><th class="num">Balance</th></tr></thead><tbody>
-  ${rows.map(t=>`<tr><td class="when">${fmtDT(t.created_at)}</td>${showDriver?`<td>${esc(uname(t.driver_id))}</td>`:""}<td>${esc(t.reason)}</td>${compact?"":`<td class="dim">${esc(uname(t.performed_by_user_id))}</td>`}
+  ${rows.map(t=>`<tr><td class="when">${fmtDT(t.created_at)}</td>${showDriver?`<td>${esc(t.driver_name ?? uname(t.driver_id))}</td>`:""}<td>${esc(t.reason)}</td>${compact?"":`<td class="dim">${esc(t.by_name ?? uname(t.performed_by_user_id))}</td>`}
   <td class="num ${t.points_delta>0?"plus":"minus"}">${t.points_delta>0?"+":"−"}${n(Math.abs(t.points_delta))}</td><td class="num">${n(t.balance_after)}</td></tr>`).join("")}</tbody></table></div>`;
 }
 const byNewest = (a,b)=>b.created_at.localeCompare(a.created_at);
@@ -117,9 +117,8 @@ function bindCancel(){
     toast(`Order #${o.order_id} cancelled and refunded`); App.render();});
 }
 
-function adjustDialog(did){
-  const u=user(did);
-  $("#dlgBody").innerHTML=`<h2 style="margin:0">Adjust points for ${esc(u.first_name)} ${esc(u.last_name)}</h2>
+function adjustDialog(did, name = uname(did)){
+  $("#dlgBody").innerHTML=`<h2 style="margin:0">Adjust points for ${esc(name)}</h2>
     <div class="row"><label class="row"><input type="radio" name="dir" value="1" checked> Add</label><label class="row"><input type="radio" name="dir" value="-1"> Deduct</label></div>
     <label class="field">Points<input type="number" id="amt" min="1" value="500" required></label>
     <label class="field">Reason (the driver sees this)<input type="text" id="why" placeholder="e.g. Clean roadside inspection" required></label>

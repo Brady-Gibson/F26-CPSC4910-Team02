@@ -16,26 +16,49 @@
 <script src="../assets/js/mock-data.js"></script>
 <script src="../assets/js/app.js"></script>
 <script>
-VIEWS.sponsor.drivers = () => {
-  const s=sponsor(mySponsor()), ds=DB.driver.filter(d=>d.sponsor_id===s.sponsor_id);
-  return `<div class="head"><div><h1>Drivers</h1><p class="sub">${ds.filter(d=>d.participation_status==="ACTIVE").length} active drivers at ${esc(s.sponsor_name)}. 1 point = ${usd(s.point_dollar_rate)}.</p></div>
+/* LIVE: GET /api/sponsor/drivers, POST /api/sponsor/drivers/<id>/points (in adjustDialog), POST /api/sponsor/drivers/<id>/drop */
+
+function mockDrivers(){
+  const s = sponsor(mySponsor());
+  return { sponsor: s, drivers: DB.driver.filter(d=>d.sponsor_id===s.sponsor_id).map(d=>{ const u=user(d.driver_id);
+    return { ...d, first_name:u.first_name, last_name:u.last_name, username:u.username, account_status:u.account_status }; }) };
+}
+
+let driverRows = [];
+
+VIEWS.sponsor.drivers = async () => {
+  const { sponsor: s, drivers } = LIVE ? await App.api("/api/sponsor/drivers") : mockDrivers();
+  driverRows = drivers;
+  return `<div class="head"><div><h1>Drivers</h1><p class="sub">${drivers.filter(d=>d.participation_status==="ACTIVE").length} active drivers at ${esc(s.sponsor_name)}. 1 point = ${usd(s.point_dollar_rate)}.</p></div>
     <input type="search" id="dq" placeholder="Search drivers" aria-label="Search drivers"></div>
   <div class="panel flush"><div class="tw"><table><thead><tr><th>Driver</th><th>Status</th><th>Joined</th><th class="num">Points</th><th class="num">Value</th><th></th></tr></thead><tbody>
-  ${ds.map(d=>{const u=user(d.driver_id); return `<tr data-row="${esc((u.first_name+" "+u.last_name+" "+u.username).toLowerCase())}"><td><b>${esc(u.first_name)} ${esc(u.last_name)}</b><br><span class="dim">${esc(u.username)}</span></td>
-    <td>${badge(d.participation_status)}${u.account_status!=="ACTIVE"?" "+badge(u.account_status):""}</td><td>${fmtD(d.joined_at)}</td><td class="num"><b>${n(d.current_points)}</b></td><td class="num">${usd(d.current_points*s.point_dollar_rate)}</td>
-    <td class="num"><div class="row" style="justify-content:flex-end">${d.participation_status==="ACTIVE"?`<button class="btn go sm" data-adj="${d.driver_id}">Adjust points</button><button class="btn danger sm" data-drop="${d.driver_id}">Drop</button>`:""}</div></td></tr>`;}).join("")}
+  ${drivers.map(d=>`<tr data-row="${esc((d.first_name+" "+d.last_name+" "+d.username).toLowerCase())}"><td><b>${esc(d.first_name)} ${esc(d.last_name)}</b><br><span class="dim">${esc(d.username)}</span></td>
+    <td>${badge(d.participation_status)}${d.account_status!=="ACTIVE"?" "+badge(d.account_status):""}</td><td>${fmtD(d.joined_at)}</td><td class="num"><b>${n(d.current_points)}</b></td><td class="num">${usd(d.current_points*s.point_dollar_rate)}</td>
+    <td class="num"><div class="row" style="justify-content:flex-end">${d.participation_status==="ACTIVE"?`<button class="btn go sm" data-adj="${d.driver_id}">Adjust points</button><button class="btn danger sm" data-drop="${d.driver_id}">Drop</button>`:""}</div></td></tr>`).join("")
+    || `<tr><td colspan="6" class="empty">No drivers yet. Approve an application to add one.</td></tr>`}
   </tbody></table></div></div>${src("driver","user_account","point_transaction","notification","audit_event")}`;
 };
 
+async function dropDriver(d){
+  const name = `${d.first_name} ${d.last_name}`;
+  if (!confirm(`Drop ${name}? Their ${n(d.current_points)} points will be forfeited.`)) return;
+  if (LIVE) {
+    try { await App.api(`/api/sponsor/drivers/${d.driver_id}/drop`, { method: "POST" }); toast(`${name} dropped`); App.render(); }
+    catch (e) { toast(e.message); }
+    return;
+  }
+  const row = driver(d.driver_id);
+  if (row.current_points) addPoints(row.driver_id,row.sponsor_id,-row.current_points,"Points forfeited on program drop",ME.sponsor);
+  row.participation_status="DROPPED";
+  DB.notification.push({notification_id:nextId("notification","notification_id"),user_id:row.driver_id,notification_type:"DROPPED",message:`You were dropped from ${sponsor(row.sponsor_id).sponsor_name}.`,is_read:false,created_at:now()});
+  toast(`${name} dropped`); App.render();
+}
+
 bind.sponsor.drivers = () => {
+  const find = id => driverRows.find(d=>d.driver_id===id);
   $("#dq").oninput=e=>document.querySelectorAll("[data-row]").forEach(r=>r.hidden=!r.dataset.row.includes(e.target.value.toLowerCase()));
-  document.querySelectorAll("[data-adj]").forEach(b=>b.onclick=()=>adjustDialog(+b.dataset.adj));
-  document.querySelectorAll("[data-drop]").forEach(b=>b.onclick=()=>{const d=driver(+b.dataset.drop);
-    if(!confirm(`Drop ${uname(d.driver_id)}? Their ${n(d.current_points)} points will be forfeited.`)) return;
-    if(d.current_points) addPoints(d.driver_id,d.sponsor_id,-d.current_points,"Points forfeited on program drop",ME.sponsor);
-    d.participation_status="DROPPED";
-    DB.notification.push({notification_id:nextId("notification","notification_id"),user_id:d.driver_id,notification_type:"DROPPED",message:`You were dropped from ${sponsor(d.sponsor_id).sponsor_name}.`,is_read:false,created_at:now()});
-    toast(`${uname(d.driver_id)} dropped`); App.render();});
+  document.querySelectorAll("[data-adj]").forEach(b=>b.onclick=()=>{ const d=find(+b.dataset.adj); adjustDialog(d.driver_id, `${d.first_name} ${d.last_name}`); });
+  document.querySelectorAll("[data-drop]").forEach(b=>b.onclick=()=>dropDriver(find(+b.dataset.drop)));
 };
 
 App.start("sponsor", "drivers");

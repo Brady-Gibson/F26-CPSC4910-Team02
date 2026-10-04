@@ -16,10 +16,34 @@
 <script src="../assets/js/mock-data.js"></script>
 <script src="../assets/js/app.js"></script>
 <script>
-VIEWS.sponsor.orders = () => `<div class="head"><div><h1>Orders</h1><p class="sub">Orders from your drivers, including ones your team placed for them.</p></div></div>
-  ${orderCards(DB.customer_order.filter(o=>o.sponsor_id===mySponsor()),true)}${src("customer_order","order_item")}`;
+/* LIVE: GET /api/sponsor/orders, POST /api/sponsor/orders/<id>/cancel (refunds the points) */
 
-bind.sponsor.orders = bindCancel;
+function mockOrders(){
+  return { orders: DB.customer_order.filter(o=>o.sponsor_id===mySponsor()).sort((a,b)=>b.placed_at.localeCompare(a.placed_at)).map(o=>({
+    ...o, driver_name: uname(o.driver_id), placed_by_name: uname(o.placed_by_user_id),
+    items: DB.order_item.filter(i=>i.order_id===o.order_id).map(i=>({ ...i, product_name: product(i.product_id).product_name })) })) };
+}
+
+VIEWS.sponsor.orders = async () => {
+  const { orders } = LIVE ? await App.api("/api/sponsor/orders") : mockOrders();
+  const cards = orders.map(o=>`<div class="panel" style="margin-bottom:14px">
+    <div class="row spread"><div><h2 style="margin:0">Order #${o.order_id}</h2><span class="dim">${fmtDT(o.placed_at)} · ${esc(o.driver_name)}${o.placed_by_user_id!==o.driver_id?` · placed by ${esc(o.placed_by_name)}`:""}</span></div>
+    <div class="row">${badge(o.status)}${o.status==="PLACED"?`<button class="btn danger sm" data-cancel="${o.order_id}">Cancel order</button>`:""}</div></div>
+    <div class="tw"><table style="margin-top:10px"><tbody>${o.items.map(i=>`<tr><td>${esc(i.product_name)}</td><td class="num">× ${i.quantity}</td><td class="num">${n(i.unit_point_price*i.quantity)} pts</td></tr>`).join("")}
+    <tr><td><b>Total</b></td><td></td><td class="num"><b>${n(o.total_points)} pts</b> <span class="dim">(${usd(o.total_dollar_amount)})</span></td></tr></tbody></table></div></div>`).join("");
+  return `<div class="head"><div><h1>Orders</h1><p class="sub">Orders from your drivers, including ones your team placed for them.</p></div></div>
+  ${cards || `<div class="panel empty">No orders yet.</div>`}${src("customer_order","order_item")}`;
+};
+
+bind.sponsor.orders = () => {
+  if (!LIVE) return bindCancel();
+  document.querySelectorAll("[data-cancel]").forEach(b=>b.onclick=async()=>{
+    const id = +b.dataset.cancel;
+    if (!confirm(`Cancel order #${id}? The driver gets their points back.`)) return;
+    try { await App.api(`/api/sponsor/orders/${id}/cancel`, { method: "POST" }); toast(`Order #${id} cancelled and refunded`); App.render(); }
+    catch (e) { toast(e.message); }
+  });
+};
 
 App.start("sponsor", "orders");
 </script>
