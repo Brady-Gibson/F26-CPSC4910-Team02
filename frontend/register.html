@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Register · TigerTruck</title>
+  <link rel="stylesheet" href="assets/css/app.css">
+</head>
+
+<body class="auth" data-root="">
+<main class="auth-main">
+  <div class="auth-card">
+    <h2>Create Driver Account</h2>
+
+    <p class="dim">
+      Register as a driver. After signing in, you can apply to a sponsor.
+    </p>
+
+    <form id="registerForm">
+      <div class="auth-err" id="err"></div>
+
+      <label class="field">
+        First name
+        <input id="firstName" required>
+      </label>
+
+      <label class="field">
+        Last name
+        <input id="lastName" required>
+      </label>
+
+      <label class="field">
+        Username
+        <input id="username" required>
+      </label>
+
+      <label class="field">
+        Email
+        <input id="email" type="email" required>
+      </label>
+
+      <label class="field">
+        Phone
+        <input id="phone" type="tel">
+      </label>
+
+      <label class="field">
+        Password
+        <input id="password" type="password" required>
+      </label>
+
+      <label class="field">
+        Confirm password
+        <input id="confirmPassword" type="password" required>
+      </label>
+
+      <button class="btn go" type="submit" id="submit">
+        Create account
+      </button>
+    </form>
+
+    <p style="margin-top:18px">
+      Already have an account?
+      <a href="login.html">Sign in</a>
+    </p>
+  </div>
+</main>
+
+<script>
+document.querySelector("#registerForm").onsubmit = async (event) => {
+  event.preventDefault();
+
+  const errorBox = document.querySelector("#err");
+  const submit = document.querySelector("#submit");
+
+  errorBox.textContent = "";
+  submit.disabled = true;
+  submit.textContent = "Creating account…";
+
+  const response = await fetch("/api/register/driver", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    credentials: "same-origin",
+    body: JSON.stringify({
+      first_name: document.querySelector("#firstName").value,
+      last_name: document.querySelector("#lastName").value,
+      username: document.querySelector("#username").value,
+      email: document.querySelector("#email").value,
+      phone: document.querySelector("#phone").value,
+      password: document.querySelector("#password").value,
+      confirm_password: document.querySelector("#confirmPassword").value
+    })
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    errorBox.textContent = data.error || "Unable to create account.";
+    submit.disabled = false;
+    submit.textContent = "Create account";
+    return;
+  }
+
+  window.location.href = "login.html";
+};
+</script>
+</body>
+</html>
