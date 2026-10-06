@@ -296,7 +296,7 @@ function renderRail(){
   const dark = (document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark";
   $("#rail").innerHTML = `
     <a class="brand" href="${ROOT}${HOME[role]}.html" style="color:inherit;text-decoration:none">
-      <svg class="shield" viewBox="0 0 40 40" aria-hidden="true"><path d="M20 2c5 3 11 3 16 1 2 13-1 27-16 35C5 30 2 16 4 3c5 2 11 2 16-1z" fill="#00694B" stroke="#fff" stroke-width="2.5"/><text x="20" y="26" text-anchor="middle" font-family="Overpass,sans-serif" font-weight="900" font-size="13" fill="#FFB81C">02</text></svg>
+      <img class="shield" src="${ROOT}assets/img/logo.png" alt="">
       TigerTruck</a>
     <div class="who"><b>${esc(u.first_name)} ${esc(u.last_name)}</b>${esc(sub)}</div>
     ${App.me?.viewed_by ? `<div class="viewas" role="status"><b>Viewing as ${esc(u.first_name)} ${esc(u.last_name)}</b>Read only. Signed in as ${esc(App.me.viewed_by.first_name)} ${esc(App.me.viewed_by.last_name)}.
