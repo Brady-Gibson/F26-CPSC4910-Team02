@@ -25,6 +25,9 @@ bp = Blueprint("auth", __name__, url_prefix="/api")
 MAX_FAILED_LOGINS = 5
 VIEW_AS_ROLES = ("driver", "sponsor")
 READ_ONLY_METHODS = ("GET", "HEAD", "OPTIONS")
+# Audit details written by routes/admin.py. Logging one of these starts the failed-login count over.
+UNLOCKED, REACTIVATED, PASSWORD_RESET = "Unlocked by admin", "Reactivated by admin", "Password reset by admin"
+LOCKOUT_RESET_DETAILS = (UNLOCKED, REACTIVATED, PASSWORD_RESET)
 # Compared against when the username doesn't exist, so a wrong username takes as long as a wrong password.
 _DUMMY_HASH = generate_password_hash("not-a-real-password")
 
@@ -98,9 +101,12 @@ def require_role(*roles):
 
 
 def _failed_since_last_success(cur, username):
+    """Failed logins since the last good login, or since an admin unlocked the account or reset its password."""
     cur.execute(
         """SELECT COALESCE(MAX(audit_event_id), 0) AS last_ok FROM AUDIT_EVENT
-            WHERE category = 'LOGIN' AND success = TRUE AND subject_username = %s""", (username,))
+            WHERE subject_username = %s AND success = TRUE
+              AND (category = 'LOGIN' OR (category = 'ACCOUNT' AND reason_or_details IN (%s, %s, %s)))""",
+        (username, *LOCKOUT_RESET_DETAILS))
     last_ok = cur.fetchone()["last_ok"]
     cur.execute(
         """SELECT COUNT(*) AS fails FROM AUDIT_EVENT
