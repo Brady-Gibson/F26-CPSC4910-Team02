@@ -92,7 +92,7 @@ td.num,th.num{text-align:right}
 .btn:disabled{opacity:.45;cursor:not-allowed}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .spread{justify-content:space-between}
-input[type=text],input[type=password],input[type=number],input[type=search],select,textarea{border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:8px 10px;min-width:0}
+input[type=text],input[type=password],input[type=email],input[type=tel],input[type=number],input[type=search],select,textarea{border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:8px 10px;min-width:0}
 textarea{width:100%;min-height:70px}
 .field{display:flex;flex-direction:column;gap:4px;font-weight:700;font-size:14px}
 
@@ -152,7 +152,7 @@ body.auth{min-height:100vh;display:grid;grid-template-columns:minmax(320px,1fr) 
 .auth-card{width:100%;max-width:400px}
 .auth-card h2{font-size:30px;font-weight:900;margin:0 0 4px}
 .auth-card form{display:flex;flex-direction:column;gap:14px;margin-top:22px}
-.auth-card input[type=text],.auth-card input[type=password]{width:100%;padding:11px 12px;font-size:16px}
+.auth-card input[type=text],.auth-card input[type=password],.auth-card input[type=email],.auth-card input[type=tel]{width:100%;padding:11px 12px;font-size:16px}
 .pw{position:relative}
 .pw input{padding-right:64px!important}
 .pw button{position:absolute;right:6px;top:50%;transform:translateY(-50%);border:0;background:none;font-weight:800;font-size:13px;color:var(--muted);cursor:pointer;padding:6px}
