@@ -16,21 +16,143 @@
 <script src="../assets/js/mock-data.js"></script>
 <script src="../assets/js/app.js"></script>
 <script>
-VIEWS.admin.users = () => `<div class="head"><div><h1>Users</h1><p class="sub">Every account across drivers, sponsor users, and admins.</p></div>
-  <div class="row"><select id="rf" aria-label="Role"><option value="">All roles</option><option>Driver</option><option>Sponsor user</option><option>Admin</option></select><input type="search" id="uq" placeholder="Search users" aria-label="Search users"></div></div>
+/* LIVE: GET /api/admin/users, POST /api/admin/users, POST /api/admin/users/<id>/status,
+         POST /api/admin/users/<id>/reset-password */
+
+const ROLE_LABEL = { driver: "Driver", sponsor: "Sponsor user", admin: "Admin" };
+
+function mockUsers(){
+  return {
+    users: DB.user_account.map(u => { const su = DB.sponsor_user.find(s=>s.sponsor_user_id===u.user_id), d = driver(u.user_id);
+      const sid = su ? su.sponsor_id : d ? d.sponsor_id : null;
+      return { ...u, role: roleKey(u.user_id), sponsor_id: sid, sponsor_name: sid ? sponsor(sid).sponsor_name : null }; }),
+    sponsors: DB.sponsor_organization.map(({sponsor_id, sponsor_name, status}) => ({sponsor_id, sponsor_name, status})),
+  };
+}
+
+let userRows = [], sponsorList = [];
+
+VIEWS.admin.users = async () => {
+  ({ users: userRows, sponsors: sponsorList } = LIVE ? await App.api("/api/admin/users") : mockUsers());
+  return `<div class="head"><div><h1>Users</h1><p class="sub">Every account across drivers, sponsor users, and admins.</p></div>
+  <div class="row"><select id="rf" aria-label="Role"><option value="">All roles</option>${Object.entries(ROLE_LABEL).map(([k,l])=>`<option value="${k}">${l}</option>`).join("")}</select>
+    <input type="search" id="uq" placeholder="Search users" aria-label="Search users"><button class="btn go" id="addUser">Create account</button></div></div>
   <div class="panel flush"><div class="tw"><table><thead><tr><th>User</th><th>Role</th><th>Organization</th><th>Status</th><th>Created</th><th></th></tr></thead><tbody>
-  ${DB.user_account.map(u=>{const r=roleOf(u.user_id), su=DB.sponsor_user.find(s=>s.sponsor_user_id===u.user_id), d=driver(u.user_id);
-    const org = su?sponsor(su.sponsor_id).sponsor_name : d&&d.sponsor_id?sponsor(d.sponsor_id).sponsor_name : "—";
-    return `<tr data-r="${r}" data-t="${esc((u.first_name+" "+u.last_name+" "+u.username+" "+u.email).toLowerCase())}"><td><b>${esc(u.first_name)} ${esc(u.last_name)}</b><br><span class="dim">${esc(u.username)} · ${esc(u.email)}</span></td><td>${r}</td><td>${esc(org)}</td><td>${badge(u.account_status)}</td><td>${fmtD(u.created_at)}</td>
-    <td class="num">${u.user_id!==ME.admin?`<button class="btn ${u.account_status==="ACTIVE"?"danger":"ghost"} sm" data-lock="${u.user_id}">${u.account_status==="ACTIVE"?"Lock":"Unlock"}</button>`:""}</td></tr>`;}).join("")}
+  ${userRows.map(u=>`<tr data-r="${esc(u.role||"")}" data-t="${esc((u.first_name+" "+u.last_name+" "+u.username+" "+u.email).toLowerCase())}">
+    <td><b>${esc(u.first_name)} ${esc(u.last_name)}</b><br><span class="dim">${esc(u.username)} · ${esc(u.email)}</span></td>
+    <td>${ROLE_LABEL[u.role] || "No role"}</td><td>${esc(u.sponsor_name || "—")}</td><td>${badge(u.account_status)}</td><td>${fmtD(u.created_at)}</td>
+    <td class="num"><div class="row" style="justify-content:flex-end;flex-wrap:nowrap">${u.user_id===ME.admin ? `<span class="dim">You</span>` : `
+      <button class="btn ghost sm" data-reset="${u.user_id}">Reset password</button>
+      ${u.account_status==="ACTIVE" ? `<button class="btn danger sm" data-st="${u.user_id}" data-to="LOCKED">Lock</button><button class="btn danger sm" data-st="${u.user_id}" data-to="INACTIVE">Deactivate</button>`
+        : u.account_status==="LOCKED" ? `<button class="btn ghost sm" data-st="${u.user_id}" data-to="ACTIVE">Unlock</button><button class="btn danger sm" data-st="${u.user_id}" data-to="INACTIVE">Deactivate</button>`
+        : `<button class="btn ghost sm" data-st="${u.user_id}" data-to="ACTIVE">Reactivate</button>`}`}</div></td></tr>`).join("")}
   </tbody></table></div></div>${src("user_account","admin","sponsor_user","driver","audit_event")}`;
+};
+
+// A random password that meets the rules in accounts.py (upper, lower, number, symbol, 8+ characters).
+function genPassword(){
+  const sets = ["ABCDEFGHJKLMNPQRSTUVWXYZ", "abcdefghijkmnopqrstuvwxyz", "23456789", "!@#$%*?-"], all = sets.join("");
+  const rand = n => crypto.getRandomValues(new Uint32Array(1))[0] % n;
+  const chars = [...sets.map(s => s[rand(s.length)]), ...Array.from({length: 10}, () => all[rand(all.length)])];
+  for (let i = chars.length - 1; i > 0; i--) { const j = rand(i + 1); [chars[i], chars[j]] = [chars[j], chars[i]]; }
+  return chars.join("");
+}
+
+const pwField = `<label class="field">Password<div class="row" style="flex-wrap:nowrap"><input type="text" id="pw" autocomplete="new-password" required style="flex:1">
+  <button type="button" class="btn ghost sm" id="genPw">Generate</button></div>
+  <span class="dim" style="font-weight:400">At least 8 characters with an uppercase letter, a lowercase letter, a number, and a symbol. Copy it before saving; you'll give it to the user.</span></label>`;
+
+const dlgButtons = label => `<div class="row" style="justify-content:flex-end"><button class="btn ghost" value="cancel" formnovalidate>Cancel</button><button class="btn go" value="ok">${label}</button></div>`;
+
+// Opens #dlg with `html`; on the "ok" button runs save(). Stays open on an error so the admin can fix the form.
+function formDialog(html, save){
+  const form = $("#dlgBody"), dlg = $("#dlg");
+  form.innerHTML = `${html}<p id="dlgErr" role="alert" style="margin:0;color:var(--red)"></p>`;
+  if ($("#genPw")) $("#genPw").onclick = () => { $("#pw").value = genPassword(); $("#pw").select(); };
+  form.onsubmit = async e => {
+    if (e.submitter?.value !== "ok") return;
+    e.preventDefault();
+    e.submitter.disabled = true;
+    try { await save(); form.onsubmit = null; dlg.close(); App.render(); }
+    catch (err) { $("#dlgErr").textContent = err.message; e.submitter.disabled = false; }
+  };
+  dlg.onclose = () => { form.onsubmit = null; };
+  dlg.showModal();
+  form.querySelector("input,select")?.focus();
+}
+
+function createUserDialog(){
+  const opts = sponsorList.map(s=>`<option value="${s.sponsor_id}">${esc(s.sponsor_name)}${s.status!=="ACTIVE"?` (${esc(s.status.toLowerCase())})`:""}</option>`).join("");
+  formDialog(`<h2 style="margin:0">Create account</h2>
+    <label class="field">Role<select id="nuRole"><option value="driver">Driver</option><option value="sponsor">Sponsor user</option><option value="admin">Admin</option></select></label>
+    <label class="field" id="nuSponsorField">Sponsor company<select id="nuSponsor"><option value="" id="nuNone"></option>${opts}</select></label>
+    <label class="field" id="nuJobField">Job title<input type="text" id="nuJob" maxlength="100" placeholder="optional"></label>
+    <div class="row" style="flex-wrap:nowrap"><label class="field" style="flex:1">First name<input type="text" id="nuFirst" maxlength="50" required></label>
+      <label class="field" style="flex:1">Last name<input type="text" id="nuLast" maxlength="50" required></label></div>
+    <label class="field">Username<input type="text" id="nuUser" maxlength="50" autocomplete="off" required></label>
+    <label class="field">Email<input type="email" id="nuEmail" maxlength="100" required></label>
+    <label class="field">Phone<input type="text" id="nuPhone" maxlength="20" placeholder="optional"></label>
+    ${pwField}${dlgButtons("Create account")}`, async () => {
+    const r = $("#nuRole").value;
+    const body = { role: r, sponsor_id: r === "admin" ? null : ($("#nuSponsor").value || null), job_title: r === "sponsor" ? $("#nuJob").value.trim() : "",
+      first_name: $("#nuFirst").value.trim(), last_name: $("#nuLast").value.trim(), username: $("#nuUser").value.trim(),
+      email: $("#nuEmail").value.trim(), phone: $("#nuPhone").value.trim(), password: $("#pw").value };
+    if (r === "sponsor" && !body.sponsor_id) throw new Error("Pick the sponsor company this user belongs to.");
+    if (LIVE) await App.api("/api/admin/users", { method: "POST", body });
+    else mockCreate(body);
+    toast(`${ROLE_LABEL[r]} ${body.username} created`);
+  });
+  const sync = () => { const r = $("#nuRole").value;
+    $("#nuSponsorField").hidden = r === "admin"; $("#nuJobField").hidden = r !== "sponsor";
+    $("#nuNone").textContent = r === "sponsor" ? "Choose a company…" : "No sponsor yet (applicant)"; };
+  $("#nuRole").onchange = sync; sync();
+}
+
+function resetPasswordDialog(u){
+  formDialog(`<h2 style="margin:0">Reset password</h2>
+    <p class="dim" style="margin:0">Set a new password for <b>${esc(u.first_name)} ${esc(u.last_name)}</b> (${esc(u.username)}).
+      ${u.account_status==="LOCKED" ? "This also unlocks the account." : u.account_status==="INACTIVE" ? "The account stays inactive until you reactivate it." : ""}</p>
+    ${pwField}${dlgButtons("Reset password")}`, async () => {
+    const password = $("#pw").value;
+    if (LIVE) await App.api(`/api/admin/users/${u.user_id}/reset-password`, { method: "POST", body: { password } });
+    else { const row = user(u.user_id); if (row.account_status === "LOCKED") row.account_status = "ACTIVE";
+      audit({category:"ACCOUNT", actor_user_id:ME.admin, subject_username:u.username, entity_type:"USER_ACCOUNT", entity_id:u.user_id, success:true, reason_or_details:"Password reset by admin"}); }
+    toast(`Password reset for ${u.username}`);
+  });
+}
+
+async function setStatus(u, to){
+  const [verb, done] = to === "LOCKED" ? ["Lock", "locked"] : to === "INACTIVE" ? ["Deactivate", "deactivated"]
+                     : u.account_status === "LOCKED" ? ["Unlock", "unlocked"] : ["Reactivate", "reactivated"];
+  if (to !== "ACTIVE" && !confirm(`${verb} ${u.first_name} ${u.last_name} (${u.username})? They'll be signed out and can't sign in until an admin ${to==="LOCKED"?"unlocks":"reactivates"} the account.`)) return;
+  try {
+    if (LIVE) await App.api(`/api/admin/users/${u.user_id}/status`, { method: "POST", body: { status: to } });
+    else { user(u.user_id).account_status = to;
+      audit({category:"ACCOUNT", actor_user_id:ME.admin, subject_username:u.username, entity_type:"USER_ACCOUNT", entity_id:u.user_id, success:true, reason_or_details:`${done[0].toUpperCase()+done.slice(1)} by admin`}); }
+    toast(`${u.username} ${done}`);
+    App.render();
+  } catch (e) { toast(e.message); }
+}
+
+// Sample mode only: a rough copy of create_user() against the browser's DB object.
+function mockCreate(b){
+  if (!b.first_name || !b.last_name || !b.username || !b.email || !b.password) throw new Error("Fill in every required field.");
+  if (DB.user_account.some(u=>u.username.toLowerCase()===b.username.toLowerCase())) throw new Error("That username is taken.");
+  const id = nextId("user_account","user_id"), sid = b.sponsor_id ? +b.sponsor_id : null;
+  DB.user_account.push({ user_id:id, username:b.username, first_name:b.first_name, last_name:b.last_name, email:b.email.toLowerCase(), phone:b.phone||null, account_status:"ACTIVE", created_at:now() });
+  if (b.role === "admin") DB.admin.push({ admin_id:id });
+  else if (b.role === "sponsor") DB.sponsor_user.push({ sponsor_user_id:id, sponsor_id:sid, job_title:b.job_title||null });
+  else DB.driver.push({ driver_id:id, sponsor_id:sid, current_points:0, participation_status:sid?"ACTIVE":"APPLICANT", joined_at:now() });
+  audit({category:"ACCOUNT", actor_user_id:ME.admin, sponsor_id:sid, subject_username:b.username, entity_type:"USER_ACCOUNT", entity_id:id, success:true, reason_or_details:`Created ${b.role} account`});
+}
 
 bind.admin.users = () => {
+  const find = id => userRows.find(u=>u.user_id===id);
   const f=()=>{const r=$("#rf").value,q=$("#uq").value.toLowerCase(); document.querySelectorAll("[data-r]").forEach(t=>t.hidden=!((!r||t.dataset.r===r)&&t.dataset.t.includes(q)));};
   $("#rf").onchange=f; $("#uq").oninput=f;
-  document.querySelectorAll("[data-lock]").forEach(b=>b.onclick=()=>{const u=user(+b.dataset.lock); u.account_status=u.account_status==="ACTIVE"?"LOCKED":"ACTIVE";
-    DB.audit_event.push({audit_event_id:nextId("audit_event","audit_event_id"),actor_user_id:ME.admin,sponsor_id:null,driver_id:null,category:"ACCOUNT",subject_username:u.username,entity_type:"USER_ACCOUNT",entity_id:u.user_id,success:true,reason_or_details:`Account ${u.account_status.toLowerCase()}`,created_at:now()});
-    toast(`${u.username} ${u.account_status==="ACTIVE"?"unlocked":"locked"}`); App.render();});
+  $("#addUser").onclick = createUserDialog;
+  document.querySelectorAll("[data-reset]").forEach(b=>b.onclick=()=>resetPasswordDialog(find(+b.dataset.reset)));
+  document.querySelectorAll("[data-st]").forEach(b=>b.onclick=()=>setStatus(find(+b.dataset.st), b.dataset.to));
 };
 
 App.start("admin", "users");

@@ -1,15 +1,19 @@
 """Admin endpoints: /api/admin/...   Every route here uses @require_role("admin").
 
-    GET  /api/admin/users        every account with its role
-    POST /api/admin/sponsors     create a sponsor company (Add sponsor on admin/sponsors.html)
+    GET  /api/admin/users                        every account with its role, plus sponsor companies for forms
+    POST /api/admin/users                        create a driver, sponsor user, or admin account
+    POST /api/admin/users/<id>/status            lock, unlock, deactivate, or reactivate an account
+    POST /api/admin/users/<id>/reset-password    set a new password (also unlocks a locked account)
+    POST /api/admin/sponsors                     create a sponsor company (Add sponsor on admin/sponsors.html)
 """
 from decimal import Decimal, InvalidOperation
 
 from flask import Blueprint, g, jsonify, request
+from werkzeug.security import generate_password_hash
 
-from accounts import EMAIL_RE
-from audit import log_audit
-from auth import require_role
+from accounts import EMAIL_RE, ROLES, AccountError, check_password, create_user
+from audit import log_audit, notify
+from auth import PASSWORD_RESET, REACTIVATED, UNLOCKED, require_role
 from db import query, transaction
 
 bp = Blueprint("admin", __name__, url_prefix="/api/admin")
@@ -18,18 +22,108 @@ bp = Blueprint("admin", __name__, url_prefix="/api/admin")
 @bp.get("/users")
 @require_role("admin")
 def users():
-    """Read endpoint for frontend/admin/users.html (page not converted yet). Never select password_hash."""
+    """Read endpoint for frontend/admin/users.html (and the View as dialog). Never select password_hash."""
     rows = query(
-        """SELECT u.user_id, u.username, u.first_name, u.last_name, u.email, u.account_status, u.created_at,
+        """SELECT u.user_id, u.username, u.first_name, u.last_name, u.email, u.phone, u.account_status, u.created_at,
                   CASE WHEN a.admin_id IS NOT NULL THEN 'admin'
                        WHEN su.sponsor_user_id IS NOT NULL THEN 'sponsor'
-                       WHEN d.driver_id IS NOT NULL THEN 'driver' END AS role
+                       WHEN d.driver_id IS NOT NULL THEN 'driver' END AS role,
+                  COALESCE(su.sponsor_id, d.sponsor_id) AS sponsor_id, s.sponsor_name
              FROM USER_ACCOUNT u
              LEFT JOIN ADMIN a ON a.admin_id = u.user_id
              LEFT JOIN SPONSOR_USER su ON su.sponsor_user_id = u.user_id
              LEFT JOIN DRIVER d ON d.driver_id = u.user_id
+             LEFT JOIN SPONSOR_ORGANIZATION s ON s.sponsor_id = COALESCE(su.sponsor_id, d.sponsor_id)
             ORDER BY u.user_id""")
-    return jsonify(users=rows)
+    sponsors = query("SELECT sponsor_id, sponsor_name, status FROM SPONSOR_ORGANIZATION ORDER BY sponsor_name")
+    return jsonify(users=rows, sponsors=sponsors)
+
+
+@bp.post("/users")
+@require_role("admin")
+def create_account():
+    """Create a driver, sponsor user, or admin. Drivers given a sponsor start ACTIVE with that sponsor."""
+    data = request.get_json(silent=True) or {}
+    role = str(data.get("role") or "").strip().lower()
+    if role not in ROLES:
+        return jsonify(error="Pick a role: driver, sponsor user, or admin."), 400
+    sponsor_id = None
+    if role != "admin" and data.get("sponsor_id") not in (None, ""):
+        try:
+            sponsor_id = int(data["sponsor_id"])
+        except (TypeError, ValueError):
+            return jsonify(error="Pick a sponsor company."), 400
+    try:
+        with transaction() as cur:
+            user_id = create_user(cur, role, username=data.get("username"), password=str(data.get("password") or ""),
+                                  first_name=data.get("first_name"), last_name=data.get("last_name"),
+                                  email=data.get("email"), phone=data.get("phone"), sponsor_id=sponsor_id,
+                                  job_title=data.get("job_title") if role == "sponsor" else None,
+                                  created_by=g.user["user_id"])
+    except AccountError as e:
+        return jsonify(error=str(e)), 400
+    return jsonify(ok=True, user_id=user_id), 201
+
+
+def _target(cur, user_id):
+    cur.execute("SELECT user_id, username, account_status FROM USER_ACCOUNT WHERE user_id = %s FOR UPDATE", (user_id,))
+    return cur.fetchone()
+
+
+# (current status, new status) -> audit details. UNLOCKED and REACTIVATED also restart the failed-login count.
+STATUS_CHANGES = {
+    ("ACTIVE", "LOCKED"): "Locked by admin",
+    ("ACTIVE", "INACTIVE"): "Deactivated by admin",
+    ("LOCKED", "INACTIVE"): "Deactivated by admin",
+    ("LOCKED", "ACTIVE"): UNLOCKED,
+    ("INACTIVE", "ACTIVE"): REACTIVATED,
+}
+
+
+@bp.post("/users/<int:user_id>/status")
+@require_role("admin")
+def set_status(user_id):
+    """Body: {"status": "ACTIVE" | "LOCKED" | "INACTIVE"}. Takes effect on the user's next request."""
+    status = str((request.get_json(silent=True) or {}).get("status") or "").strip().upper()
+    if status not in ("ACTIVE", "LOCKED", "INACTIVE"):
+        return jsonify(error="Status must be ACTIVE, LOCKED, or INACTIVE."), 400
+    if user_id == g.user["user_id"]:
+        return jsonify(error="You can't change the status of your own account."), 400
+    with transaction() as cur:
+        u = _target(cur, user_id)
+        if u is None:
+            return jsonify(error="User not found."), 404
+        details = STATUS_CHANGES.get((u["account_status"], status))
+        if details is None:
+            return jsonify(error=f"That account is already {u['account_status'].lower()}."), 400
+        cur.execute("UPDATE USER_ACCOUNT SET account_status = %s WHERE user_id = %s",
+                    (status, user_id))
+        log_audit(cur, "ACCOUNT", True, actor_user_id=g.user["user_id"], subject_username=u["username"],
+                  entity_type="USER_ACCOUNT", entity_id=user_id, details=details)
+    return jsonify(ok=True, account_status=status)
+
+
+@bp.post("/users/<int:user_id>/reset-password")
+@require_role("admin")
+def reset_password(user_id):
+    """Body: {"password": "..."}. The admin passes the new password to the user. A LOCKED account is unlocked;
+    an INACTIVE one stays inactive."""
+    password = str((request.get_json(silent=True) or {}).get("password") or "")
+    try:
+        check_password(password)
+    except AccountError as e:
+        return jsonify(error=str(e)), 400
+    with transaction() as cur:
+        u = _target(cur, user_id)
+        if u is None:
+            return jsonify(error="User not found."), 404
+        status = "ACTIVE" if u["account_status"] == "LOCKED" else u["account_status"]
+        cur.execute("UPDATE USER_ACCOUNT SET password_hash = %s, account_status = %s "
+                    "WHERE user_id = %s", (generate_password_hash(password), status, user_id))
+        log_audit(cur, "ACCOUNT", True, actor_user_id=g.user["user_id"], subject_username=u["username"],
+                  entity_type="USER_ACCOUNT", entity_id=user_id, details=PASSWORD_RESET)
+        notify(cur, user_id, "ACCOUNT", "An admin reset your password.")
+    return jsonify(ok=True, account_status=status)
 
 
 @bp.post("/sponsors")
