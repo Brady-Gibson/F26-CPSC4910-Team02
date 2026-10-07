@@ -51,9 +51,9 @@ def test_admin_creates_sponsor_user_who_can_sign_in(client, db):
 
 def test_admin_creates_driver_with_and_without_sponsor(client, db):
     as_admin(client)
-    r = client.post("/api/admin/users", json=new_account(role="driver", username="d1", email="d1@example.com"))
+    r = client.post("/api/admin/users", json=new_account(role="driver", username="drv1", email="d1@example.com"))
     assert one(db, "SELECT * FROM DRIVER WHERE driver_id=%s", r.get_json()["user_id"])["participation_status"] == "ACTIVE"
-    r = client.post("/api/admin/users", json=new_account(role="driver", sponsor_id=None, username="d2", email="d2@example.com"))
+    r = client.post("/api/admin/users", json=new_account(role="driver", sponsor_id=None, username="drv2", email="d2@example.com"))
     row = one(db, "SELECT * FROM DRIVER WHERE driver_id=%s", r.get_json()["user_id"])
     assert row["participation_status"] == "APPLICANT" and row["sponsor_id"] is None
 
