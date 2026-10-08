@@ -20,9 +20,10 @@ VIEWS.driver.profile = () => { const u=user(ME.driver);
   return `<div class="head"><div><h1>Profile</h1></div></div><div class="grid g2"><div class="panel"><div class="grid" style="gap:12px">
   ${[["first_name","First name"],["last_name","Last name"],["email","Email"],["phone","Phone"]].map(([k,l])=>`<label class="field">${l}<input type="text" data-f="${k}" value="${esc(u[k])}"></label>`).join("")}
   <button class="btn go" id="saveP">Save changes</button></div></div>
-  <div class="panel"><h2>Account</h2><p>Username <b>${esc(u.username)}</b></p><p>Status ${badge(u.account_status)}</p><button class="btn ghost">Change password</button>${src("user_account","audit_event")}</div></div>`; };
+  <div class="panel"><h2>Account</h2><p>Username <b>${esc(u.username)}</b></p><p>Status ${badge(u.account_status)}</p><button class="btn ghost" id="changePw">Change password</button>${src("user_account","audit_event")}</div></div>`; };
 
-bind.driver.profile = () => { $("#saveP").onclick=()=>{const u=user(ME.driver); document.querySelectorAll("[data-f]").forEach(i=>u[i.dataset.f]=i.value); u.updated_at=now(); toast("Changes saved");}; };
+bind.driver.profile = () => { $("#saveP").onclick=()=>{const u=user(ME.driver); document.querySelectorAll("[data-f]").forEach(i=>u[i.dataset.f]=i.value); u.updated_at=now(); toast("Changes saved");};
+  $("#changePw").onclick = changePasswordDialog; };
 
 App.start("driver", "profile");
 </script>

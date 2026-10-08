@@ -16,7 +16,7 @@ from functools import wraps
 from flask import Blueprint, g, jsonify, request, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from accounts import AccountError, create_user
+from accounts import AccountError, check_password, create_user
 from audit import log_audit
 from db import query, transaction
 
@@ -219,6 +219,41 @@ def me():
     if u is None:
         return jsonify(error="Please sign in."), 401
     return jsonify(user=public_user(u, g.viewed_by))
+
+
+@bp.post("/me/password")
+@require_role()
+def change_password():
+    """Any signed-in user changes their own password.
+    Body: {"current_password": ..., "new_password": ..., "confirm_password": ...}."""
+    data = request.get_json(silent=True) or {}
+    current = str(data.get("current_password") or "")
+    new = str(data.get("new_password") or "")
+    if not current or not new:
+        return jsonify(error="Enter your current password and a new one."), 400
+    if new != str(data.get("confirm_password") or ""):
+        return jsonify(error="New passwords don't match."), 400
+    if new == current:
+        return jsonify(error="Your new password must be different from your current one."), 400
+    try:
+        check_password(new)
+    except AccountError as e:
+        return jsonify(error=str(e)), 400
+
+    u = g.user
+    with transaction() as cur:
+        cur.execute("SELECT password_hash FROM USER_ACCOUNT WHERE user_id = %s FOR UPDATE", (u["user_id"],))
+        if not check_password_hash(cur.fetchone()["password_hash"], current):
+            log_audit(cur, "ACCOUNT", False, actor_user_id=u["user_id"], subject_username=u["username"],
+                      entity_type="USER_ACCOUNT", entity_id=u["user_id"],
+                      details="Password change failed: wrong current password")
+            return jsonify(error="Your current password is incorrect."), 400
+        cur.execute("UPDATE USER_ACCOUNT SET password_hash = %s WHERE user_id = %s",
+                    (generate_password_hash(new), u["user_id"]))
+        log_audit(cur, "ACCOUNT", True, actor_user_id=u["user_id"], subject_username=u["username"],
+                  sponsor_id=u["sponsor_id"], driver_id=u["user_id"] if u["role"] == "driver" else None,
+                  entity_type="USER_ACCOUNT", entity_id=u["user_id"], details="Password changed")
+    return jsonify(ok=True)
 
 
 @bp.post("/view-as")
