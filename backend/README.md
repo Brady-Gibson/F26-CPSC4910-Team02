@@ -39,4 +39,4 @@ python scripts/make_deploy_zip.py
 ```
 Then Beanstalk console → Team02-gdip-env → **Upload and deploy** → choose `backend/deploy.zip` with a new version label.
 
-Secrets (database credentials, `SECRET_KEY`) live in the Beanstalk environment properties, not in the zip or the repo. The workflow never changes them.
+Secrets (database credentials, `SECRET_KEY`) live in the Beanstalk environment properties, not in the zip or the repo. The workflow never changes them. The AWS key the workflow deploys with is stored in GitHub → Settings → Environments → **production** (secrets `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`), which only the `main` branch can use.
