@@ -141,7 +141,7 @@ dialog::backdrop{background:rgba(20,24,26,.55)}
 body.auth{min-height:100vh;display:grid;grid-template-columns:minmax(320px,1fr) minmax(360px,520px)}
 .auth-side{
   background:
-    linear-gradient(rgba(13,39,66,.78), rgba(13,39,66,.78)),
+    linear-gradient(rgba(13,39,66,.25), rgba(13,39,66,.25)),
     url("../img/logo.png") center/600px no-repeat,
     var(--asphalt);
   color:#fff;
