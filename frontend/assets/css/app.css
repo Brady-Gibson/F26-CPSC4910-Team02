@@ -142,7 +142,7 @@ body.auth{min-height:100vh;display:grid;grid-template-columns:minmax(320px,1fr) 
 .auth-side{
   background:
     linear-gradient(rgba(13,39,66,.78), rgba(13,39,66,.78)),
-    url("../img/logo.png") center/420px no-repeat,
+    url("../img/logo.png") center/600px no-repeat,
     var(--asphalt);
   color:#fff;
   padding:40px clamp(24px,5vw,64px);
