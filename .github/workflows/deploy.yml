@@ -1,7 +1,8 @@
 # Test, then deploy to Elastic Beanstalk.
 #   Pull request into main -> tests only.
 #   Push to main (a merged PR) or "Run workflow" on main -> tests, then deploy.
-# AWS keys come from the repo secrets AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY.
+# AWS keys are secrets of the GitHub environment "production" (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY),
+# limited to the main branch, so pull-request runs never get them.
 # DB credentials and SECRET_KEY stay in the Beanstalk environment properties; nothing here touches them.
 name: Test and deploy
 
@@ -56,6 +57,7 @@ jobs:
     needs: test
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    environment: production         # holds the AWS secrets; only main may use it
     concurrency:
       group: beanstalk-deploy        # one deploy at a time; a newer one waits instead of cancelling
       cancel-in-progress: false
