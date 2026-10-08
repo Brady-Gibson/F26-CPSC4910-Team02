@@ -139,17 +139,45 @@ dialog::backdrop{background:rgba(20,24,26,.55)}
 
 /* Login */
 body.auth{min-height:100vh;display:grid;grid-template-columns:minmax(320px,1fr) minmax(360px,520px)}
-.auth-side{background:var(--asphalt);color:#fff;padding:40px clamp(24px,5vw,64px);display:flex;flex-direction:column;justify-content:space-between;gap:32px}
-.auth-side .brand{padding:0}
-.auth-sign{max-width:520px}
+.auth-side{
+  background:
+    linear-gradient(rgba(13,39,66,.78), rgba(13,39,66,.78)),
+    url("../img/logo.png") center/420px no-repeat,
+    var(--asphalt);
+  color:#fff;
+  padding:40px clamp(24px,5vw,64px);
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  align-items:center;
+  gap:32px;
+  position:relative;
+}
+
+.auth-side .brand{
+  display:none;
+}
+
+.auth-sign{
+  max-width:520px;
+  width:100%;
+}
+
 .auth-sign .sign-in{
   display:block;
   text-align:center;
 }
 .auth-sign h1{color:#fff;font-size:clamp(34px,4.6vw,54px);margin:6px 0 10px}
-.auth-sign p{margin:0;opacity:.92;font-size:17px;max-width:40ch}
+.auth-sign p{margin:0 auto;opacity:.92;font-size:17px;max-width:40ch}
 .auth-sign .sign-exit{display:inline-block;margin-top:18px}
-.auth-note{font-size:13px;color:#A9B6C6}
+.auth-note{
+  position:absolute;
+  bottom:40px;
+  left:clamp(24px,5vw,64px);
+  font-size:13px;
+  color:#A9B6C6;
+}
+
 .auth-note a{color:#E6EBF1}
 .auth-main{display:flex;align-items:center;justify-content:center;padding:40px 24px;background:var(--bg)}
 .auth-card{width:100%;max-width:400px}
