@@ -59,6 +59,15 @@ def _clean(value, field, max_len, required=True):
     return value or None
 
 
+def clean_profile(first_name, last_name, email, phone):
+    """Validate the editable profile fields. Returns (first_name, last_name, email, phone); raises AccountError."""
+    email = _clean(email, "Email", 100).lower()
+    if not EMAIL_RE.match(email):
+        raise AccountError("Enter a valid email address.")
+    return (_clean(first_name, "First name", 50), _clean(last_name, "Last name", 50), email,
+            _clean(phone, "Phone", 20, required=False))
+
+
 def create_user(cur, role, *, username, password, first_name, last_name, email,
                 phone=None, sponsor_id=None, job_title=None, created_by=None):
     """Create a user and their role row inside the caller's transaction. Returns the new user_id."""
@@ -68,12 +77,7 @@ def create_user(cur, role, *, username, password, first_name, last_name, email,
     username = _clean(username, "Username", 50)
     if not USERNAME_RE.match(username):
         raise AccountError("Username must be 3-50 characters: letters, numbers, dots, dashes, or underscores.")
-    email = _clean(email, "Email", 100).lower()
-    if not EMAIL_RE.match(email):
-        raise AccountError("Enter a valid email address.")
-    first_name = _clean(first_name, "First name", 50)
-    last_name = _clean(last_name, "Last name", 50)
-    phone = _clean(phone, "Phone", 20, required=False)
+    first_name, last_name, email, phone = clean_profile(first_name, last_name, email, phone)
     job_title = _clean(job_title, "Job title", 100, required=False)
     check_password(password)
 

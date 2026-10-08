@@ -13,10 +13,11 @@ blocks anything but GET, so viewing is read-only.
 """
 from functools import wraps
 
+import mysql.connector
 from flask import Blueprint, g, jsonify, request, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from accounts import AccountError, check_password, create_user
+from accounts import AccountError, check_password, clean_profile, create_user
 from audit import log_audit
 from db import query, transaction
 
@@ -219,6 +220,55 @@ def me():
     if u is None:
         return jsonify(error="Please sign in."), 401
     return jsonify(user=public_user(u, g.viewed_by))
+
+
+PROFILE_FIELDS = ("first_name", "last_name", "email", "phone")
+
+
+def _profile(user_id):
+    return query("""SELECT user_id, username, first_name, last_name, email, phone, account_status, created_at
+                      FROM USER_ACCOUNT WHERE user_id = %s""", (user_id,), one=True)
+
+
+@bp.get("/me/profile")
+@require_role()
+def get_profile():
+    """The signed-in user's editable profile (any role)."""
+    return jsonify(profile=_profile(g.user["user_id"]))
+
+
+@bp.post("/me/profile")
+@require_role()
+def update_profile():
+    """Body: {"first_name", "last_name", "email", "phone"}. Username can't be changed here."""
+    data = request.get_json(silent=True) or {}
+    u = g.user
+    try:
+        first_name, last_name, email, phone = clean_profile(*(data.get(k) for k in PROFILE_FIELDS))
+    except AccountError as e:
+        return jsonify(error=str(e)), 400
+
+    with transaction() as cur:
+        cur.execute("SELECT 1 FROM USER_ACCOUNT WHERE LOWER(email) = %s AND user_id <> %s LIMIT 1",
+                    (email, u["user_id"]))
+        if cur.fetchone():
+            return jsonify(error="An account with that email already exists."), 400
+        cur.execute("SELECT first_name, last_name, email, phone FROM USER_ACCOUNT WHERE user_id = %s FOR UPDATE",
+                    (u["user_id"],))
+        before = cur.fetchone()
+        after = dict(zip(PROFILE_FIELDS, (first_name, last_name, email, phone)))
+        changed = [k for k in PROFILE_FIELDS if before[k] != after[k]]
+        if changed:
+            try:
+                cur.execute("UPDATE USER_ACCOUNT SET first_name = %s, last_name = %s, email = %s, phone = %s "
+                            "WHERE user_id = %s", (first_name, last_name, email, phone, u["user_id"]))
+            except mysql.connector.IntegrityError:  # someone took the email a moment ago
+                return jsonify(error="An account with that email already exists."), 400
+            log_audit(cur, "ACCOUNT", True, actor_user_id=u["user_id"], subject_username=u["username"],
+                      sponsor_id=u["sponsor_id"], driver_id=u["user_id"] if u["role"] == "driver" else None,
+                      entity_type="USER_ACCOUNT", entity_id=u["user_id"],
+                      details="Profile updated: " + ", ".join(k.replace("_", " ") for k in changed))
+    return jsonify(ok=True, changed=changed, profile=_profile(u["user_id"]))
 
 
 @bp.post("/me/password")
