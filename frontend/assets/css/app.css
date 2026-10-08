@@ -142,7 +142,10 @@ body.auth{min-height:100vh;display:grid;grid-template-columns:minmax(320px,1fr) 
 .auth-side{background:var(--asphalt);color:#fff;padding:40px clamp(24px,5vw,64px);display:flex;flex-direction:column;justify-content:space-between;gap:32px}
 .auth-side .brand{padding:0}
 .auth-sign{max-width:520px}
-.auth-sign .sign-in{display:block}
+.auth-sign .sign-in{
+  display:block;
+  text-align:center;
+}
 .auth-sign h1{color:#fff;font-size:clamp(34px,4.6vw,54px);margin:6px 0 10px}
 .auth-sign p{margin:0;opacity:.92;font-size:17px;max-width:40ch}
 .auth-sign .sign-exit{display:inline-block;margin-top:18px}
