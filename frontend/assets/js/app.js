@@ -277,6 +277,31 @@ async function viewAsDialog(){
   dlg.showModal();
 }
 
+// Any role: POST /api/me/password. Call from a page's "Change password" button.
+function changePasswordDialog(){
+  const form = $("#dlgBody"), dlg = $("#dlg");
+  const pw = (id, label, ac) => `<label class="field">${label}<input type="password" id="${id}" autocomplete="${ac}" required></label>`;
+  form.innerHTML = `<h2 style="margin:0">Change password</h2>
+    ${pw("pwCur", "Current password", "current-password")}${pw("pwNew", "New password", "new-password")}${pw("pwConf", "Confirm new password", "new-password")}
+    <p class="dim" style="margin:0">At least 8 characters with an uppercase letter, a lowercase letter, a number, and a symbol.</p>
+    <p id="pwErr" role="alert" style="margin:0;color:var(--red)"></p>
+    <div class="row" style="justify-content:flex-end"><button class="btn ghost" value="cancel" formnovalidate>Cancel</button><button class="btn go" value="ok">Change password</button></div>`;
+  form.onsubmit = async e => {
+    if (e.submitter?.value !== "ok") return;
+    e.preventDefault();
+    const body = { current_password: $("#pwCur").value, new_password: $("#pwNew").value, confirm_password: $("#pwConf").value };
+    e.submitter.disabled = true;
+    try {
+      if (LIVE) await App.api("/api/me/password", { method: "POST", body });
+      else if (body.new_password !== body.confirm_password) throw new Error("New passwords don't match.");
+      form.onsubmit = null; dlg.close(); toast("Password changed");
+    } catch (err) { $("#pwErr").textContent = err.message; e.submitter.disabled = false; }
+  };
+  dlg.onclose = () => { form.onsubmit = null; };
+  dlg.showModal();
+  $("#pwCur").focus();
+}
+
 async function stopViewAs(){
   try { await App.api("/api/view-as/stop", { method: "POST" }); location.href = ROOT + HOME.admin + ".html"; }
   catch (e) { toast(e.message); }
