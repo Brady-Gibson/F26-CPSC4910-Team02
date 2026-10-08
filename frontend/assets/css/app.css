@@ -140,27 +140,33 @@ dialog::backdrop{background:rgba(20,24,26,.55)}
 /* Login */
 body.auth{min-height:100vh;display:grid;grid-template-columns:minmax(320px,1fr) minmax(360px,520px)}
 .auth-side{
-  background:
-    linear-gradient(rgba(13,39,66,.25), rgba(13,39,66,.25)),
-    url("../img/logo.png") center/600px no-repeat,
-    var(--asphalt);
+  background:var(--asphalt);
   color:#fff;
   padding:40px clamp(24px,5vw,64px);
-  display:flex;
-  flex-direction:column;
-  justify-content:center;
+  display:grid;
+  grid-template-rows:auto 1fr auto;
+  justify-items:center;
   align-items:center;
   gap:32px;
   position:relative;
 }
 
 .auth-side .brand{
-  display:none;
+  display:flex;
+  justify-self:start;
+}
+
+.auth-side .brand img.shield{
+  width:clamp(110px,11vw,150px);
+  height:auto;
+  flex-shrink:0;
+  object-fit:contain;
 }
 
 .auth-sign{
   max-width:520px;
   width:100%;
+  transform:translateY(-24px);
 }
 
 .auth-sign .sign-in{
@@ -171,9 +177,7 @@ body.auth{min-height:100vh;display:grid;grid-template-columns:minmax(320px,1fr) 
 .auth-sign p{margin:0 auto;opacity:.92;font-size:17px;max-width:40ch}
 .auth-sign .sign-exit{display:inline-block;margin-top:18px}
 .auth-note{
-  position:absolute;
-  bottom:40px;
-  left:clamp(24px,5vw,64px);
+  justify-self:start;
   font-size:13px;
   color:#A9B6C6;
 }
@@ -198,6 +202,8 @@ body.auth{min-height:100vh;display:grid;grid-template-columns:minmax(320px,1fr) 
 @media (max-width:860px){
   body.auth{grid-template-columns:1fr}
   .auth-side{padding:24px}
+  .auth-side .brand img.shield{width:90px}
+  .auth-sign{transform:translateY(-12px)}
   .auth-sign p,.auth-note{display:none}
 }
 
