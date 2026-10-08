@@ -1,0 +1,131 @@
+# Test, then deploy to Elastic Beanstalk.
+#   Pull request into main -> tests only.
+#   Push to main (a merged PR) or "Run workflow" on main -> tests, then deploy.
+# AWS keys come from the repo secrets AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY.
+# DB credentials and SECRET_KEY stay in the Beanstalk environment properties; nothing here touches them.
+name: Test and deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  EB_APP: team02-gdip
+  EB_ENV: Team02-gdip-env
+  EB_BUCKET: elasticbeanstalk-us-east-1-274815321855
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      # Throwaway database for backend/tests (conftest.py drops and rebuilds Team02_TEST).
+      # The password only exists inside this CI container.
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: ci-only
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci-only --silent"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - run: pip install -r backend/requirements-dev.txt
+      - name: Run tests
+        working-directory: backend
+        env:
+          TEST_DB_HOST: 127.0.0.1
+          TEST_DB_PORT: "3306"
+          TEST_DB_USER: root
+          TEST_DB_PASSWORD: ci-only
+        run: python -m pytest tests -v
+
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: beanstalk-deploy        # one deploy at a time; a newer one waits instead of cancelling
+      cancel-in-progress: false
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Build deploy.zip
+        run: python backend/scripts/make_deploy_zip.py
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload and create application version
+        run: |
+          VERSION="${GITHUB_SHA::7}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          EXISTING=$(aws elasticbeanstalk describe-application-versions --application-name "$EB_APP" \
+            --version-labels "$VERSION" --query 'ApplicationVersions[0].VersionLabel' --output text)
+          if [ "$EXISTING" = "$VERSION" ]; then
+            echo "Version $VERSION already exists (re-run of the same commit); deploying it again."
+            exit 0
+          fi
+          KEY="$EB_APP/github-actions/$VERSION.zip"
+          aws s3 cp backend/deploy.zip "s3://$EB_BUCKET/$KEY"
+          aws elasticbeanstalk create-application-version --application-name "$EB_APP" \
+            --version-label "$VERSION" --description "GitHub Actions run ${GITHUB_RUN_ID} for ${GITHUB_SHA}" \
+            --source-bundle "S3Bucket=$EB_BUCKET,S3Key=$KEY"
+
+      - name: Deploy to environment
+        run: |
+          START=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          echo "START=$START" >> "$GITHUB_ENV"
+          aws elasticbeanstalk update-environment --environment-name "$EB_ENV" --version-label "$VERSION" \
+            --query '{Status: Status, Version: VersionLabel}'
+
+      - name: Wait for the update to finish
+        run: |
+          for _ in $(seq 1 120); do                      # up to 30 minutes
+            read -r STATUS HEALTH LABEL CNAME < <(aws elasticbeanstalk describe-environments \
+              --environment-names "$EB_ENV" --no-include-deleted \
+              --query 'Environments[0].[Status,Health,VersionLabel,CNAME]' --output text)
+            echo "$(date -u +%H:%M:%S)  status=$STATUS health=$HEALTH version=$LABEL"
+            [ "$STATUS" = "Ready" ] && break
+            sleep 15
+          done
+          echo "CNAME=$CNAME" >> "$GITHUB_ENV"
+
+          echo "--- Beanstalk events since $START ---"
+          aws elasticbeanstalk describe-events --environment-name "$EB_ENV" --start-time "$START" \
+            --query 'Events[].[EventDate,Severity,Message]' --output text | sort
+
+          ERRORS=$(aws elasticbeanstalk describe-events --environment-name "$EB_ENV" --start-time "$START" \
+            --severity ERROR --query 'length(Events)' --output text)
+          if [ "$STATUS" != "Ready" ]; then echo "::error::Environment never returned to Ready."; exit 1; fi
+          if [ "$ERRORS" != "0" ]; then echo "::error::Beanstalk reported $ERRORS error event(s); see above."; exit 1; fi
+          if [ "$LABEL" != "$VERSION" ]; then echo "::error::Environment is on $LABEL, not $VERSION."; exit 1; fi
+          if [ "$HEALTH" = "Red" ]; then echo "::error::Environment health is Red."; exit 1; fi
+
+      - name: Check the live site
+        run: |
+          for _ in $(seq 1 12); do
+            if curl -fsS --max-time 10 "http://$CNAME/api/health"; then echo; echo "Deployed $VERSION to http://$CNAME"; exit 0; fi
+            sleep 10
+          done
+          echo "::error::http://$CNAME/api/health did not answer OK after the deploy."
+          exit 1

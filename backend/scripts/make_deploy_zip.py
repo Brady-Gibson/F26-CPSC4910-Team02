@@ -1,9 +1,9 @@
 """Build deploy.zip for Elastic Beanstalk (upload it in the EB console).
 
-Run from the backend folder:   python scripts/make_deploy_zip.py
+Run from the backend folder:   python scripts/make_deploy_zip.py   (works from any folder; CI runs it on Linux)
 
 Puts the backend files at the root of the zip and the pages in frontend/.
-Leaves out .env (secrets go in EB environment properties), venv, and caches.
+Leaves out .env (secrets go in EB environment properties), venv, caches, scripts, and tests.
 """
 import os
 import zipfile
@@ -11,7 +11,7 @@ import zipfile
 BACKEND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FRONTEND = os.path.join(BACKEND, "..", "frontend")
 OUT = os.path.join(BACKEND, "deploy.zip")
-SKIP_DIRS = {"venv", ".venv", "__pycache__", ".git", "scripts"}
+SKIP_DIRS = {"venv", ".venv", "__pycache__", ".pytest_cache", ".git", "scripts", "tests"}
 SKIP_FILES = {".env", "deploy.zip"}
 
 
