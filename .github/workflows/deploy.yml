@@ -93,6 +93,19 @@ jobs:
             --version-label "$VERSION" --description "GitHub Actions run ${GITHUB_RUN_ID} for ${GITHUB_SHA}" \
             --source-bundle "S3Bucket=$EB_BUCKET,S3Key=$KEY"
 
+      - name: Wait until the environment is free
+        # Beanstalk refuses a deploy while another update (a console upload, a config change) is running.
+        run: |
+          for _ in $(seq 1 60); do                       # up to 15 minutes
+            STATUS=$(aws elasticbeanstalk describe-environments --environment-names "$EB_ENV" --no-include-deleted \
+              --query 'Environments[0].Status' --output text)
+            [ "$STATUS" = "Ready" ] && exit 0
+            echo "$(date -u +%H:%M:%S)  environment is $STATUS; waiting for Ready"
+            sleep 15
+          done
+          echo "::error::$EB_ENV stayed '$STATUS' for 15 minutes. Check the Beanstalk console (Events tab), then re-run this job."
+          exit 1
+
       - name: Deploy to environment
         run: |
           START=$(date -u +%Y-%m-%dT%H:%M:%SZ)
