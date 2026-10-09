@@ -18,7 +18,7 @@ from flask import Blueprint, g, jsonify, request, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from accounts import AccountError, check_password, clean_profile, create_user
-from audit import log_audit
+from audit import log_audit, notify
 from db import query, transaction
 
 bp = Blueprint("auth", __name__, url_prefix="/api")
@@ -303,6 +303,9 @@ def change_password():
         log_audit(cur, "ACCOUNT", True, actor_user_id=u["user_id"], subject_username=u["username"],
                   sponsor_id=u["sponsor_id"], driver_id=u["user_id"] if u["role"] == "driver" else None,
                   entity_type="USER_ACCOUNT", entity_id=u["user_id"], details="Password changed")
+        # Security notice: always sent, not controlled by ALERT_PREFERENCE.
+        notify(cur, u["user_id"], "PASSWORD_CHANGED",
+               "Your password was changed. If you didn't do this, contact your sponsor or an admin right away.")
     return jsonify(ok=True)
 
 

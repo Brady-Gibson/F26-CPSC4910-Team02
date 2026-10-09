@@ -8,6 +8,11 @@ Driver Sponsor Application (Sprint 3)
     GET  /api/driver/applications    this driver's applications: status, dates, rejection reason
     POST /api/driver/applications    apply to a sponsor
 
+Notifications
+    GET  /api/driver/notifications              this driver's notifications (newest first) + alert settings
+    POST /api/driver/notifications/read-all     mark every notification read
+    POST /api/driver/alert-preferences          save alert settings (drop alerts can't be turned off)
+
 Stories covered here: Sponsor Incentive Program, Driver Application Status, Rejection Reason
 Statement, Required Information, One Sponsor, Recorded Application. The two alert stories
 (Application Alert / Application Rejection Alert) happen when the sponsor decides, in routes/sponsor.py.
@@ -169,3 +174,66 @@ def apply():
                   entity_id=application_id, details=f"Applied to {sponsor['sponsor_name']}")
 
     return jsonify(ok=True, application_id=application_id, status="PENDING"), 201
+
+
+# ---- Notifications
+
+PREF_KEYS = ("point_change_enabled", "order_summary_enabled", "drop_alert_enabled")
+
+
+def _preferences(uid):
+    p = query("""SELECT point_change_enabled, order_summary_enabled, drop_alert_enabled
+                   FROM ALERT_PREFERENCE WHERE user_id = %s""", (uid,), one=True)
+    return {k: bool(p[k]) if p else True for k in PREF_KEYS}   # no row yet = the defaults (all on)
+
+
+@bp.get("/notifications")
+@require_role("driver")
+def notifications():
+    """Feeds frontend/driver/notifications.html."""
+    uid = g.user["user_id"]
+    rows = query(
+        """SELECT notification_id, notification_type, message, is_read, created_at
+             FROM NOTIFICATION WHERE user_id = %s
+            ORDER BY created_at DESC, notification_id DESC LIMIT 200""", (uid,))
+    for r in rows:
+        r["is_read"] = bool(r["is_read"])
+    return jsonify(notifications=rows, unread=sum(not r["is_read"] for r in rows), preferences=_preferences(uid))
+
+
+@bp.post("/notifications/read-all")
+@require_role("driver")
+def read_all():
+    with transaction() as cur:
+        cur.execute("UPDATE NOTIFICATION SET is_read = TRUE WHERE user_id = %s AND is_read = FALSE",
+                    (g.user["user_id"],))
+        marked = cur.rowcount
+    return jsonify(ok=True, marked=marked)
+
+
+@bp.post("/alert-preferences")
+@require_role("driver")
+def save_alert_preferences():
+    """Body: {"point_change_enabled": bool, "order_summary_enabled": bool}. Drop alerts are always on."""
+    data = request.get_json(silent=True) or {}
+    prefs = _preferences(g.user["user_id"])
+    for k in ("point_change_enabled", "order_summary_enabled"):
+        if k in data:
+            if not isinstance(data[k], bool):
+                return jsonify(error=f"{k} must be true or false."), 400
+            prefs[k] = data[k]
+    prefs["drop_alert_enabled"] = True
+    with transaction() as cur:
+        cur.execute(
+            """INSERT INTO ALERT_PREFERENCE (user_id, point_change_enabled, order_summary_enabled, drop_alert_enabled)
+               VALUES (%s, %s, %s, %s)
+               ON DUPLICATE KEY UPDATE point_change_enabled = VALUES(point_change_enabled),
+                                       order_summary_enabled = VALUES(order_summary_enabled),
+                                       drop_alert_enabled = VALUES(drop_alert_enabled)""",
+            (g.user["user_id"], prefs["point_change_enabled"], prefs["order_summary_enabled"], True))
+        log_audit(cur, "ACCOUNT", True, actor_user_id=g.user["user_id"], subject_username=g.user["username"],
+                  sponsor_id=g.user["sponsor_id"], driver_id=g.user["user_id"], entity_type="ALERT_PREFERENCE",
+                  entity_id=g.user["user_id"],
+                  details="Alert settings: " + ", ".join(f"{k.replace('_enabled', '').replace('_', ' ')} "
+                                                         f"{'on' if v else 'off'}" for k, v in prefs.items()))
+    return jsonify(ok=True, preferences=prefs)

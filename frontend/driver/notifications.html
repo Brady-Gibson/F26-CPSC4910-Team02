@@ -16,18 +16,42 @@
 <script src="../assets/js/mock-data.js"></script>
 <script src="../assets/js/app.js"></script>
 <script>
-VIEWS.driver.notifications = () => {
-  const ns=DB.notification.filter(x=>x.user_id===ME.driver).sort(byNewest), p=DB.alert_preference.find(x=>x.user_id===ME.driver)||{point_change_enabled:true,order_summary_enabled:true,drop_alert_enabled:true};
+/* LIVE: GET /api/driver/notifications, POST /api/driver/notifications/read-all, POST /api/driver/alert-preferences */
+
+const PREF_DEFAULTS = { point_change_enabled:true, order_summary_enabled:true, drop_alert_enabled:true };
+
+function mockNotifications(){
+  const notifications = DB.notification.filter(x=>x.user_id===ME.driver).sort(byNewest);
+  return { notifications, preferences: DB.alert_preference.find(x=>x.user_id===ME.driver) || PREF_DEFAULTS };
+}
+
+VIEWS.driver.notifications = async () => {
+  const { notifications: ns, preferences: p } = LIVE ? await App.api("/api/driver/notifications") : mockNotifications();
   const sw=(k,l,h)=>`<label class="switch"><span><b>${l}</b><br><span class="dim">${h}</span></span><input type="checkbox" data-pref="${k}" ${p[k]?"checked":""} ${k==="drop_alert_enabled"?"disabled":""}></label>`;
-  return `<div class="head"><div><h1>Notifications</h1></div><button class="btn ghost" id="readAll">Mark all as read</button></div>
+  return `<div class="head"><div><h1>Notifications</h1></div>${ns.some(x=>!x.is_read)?`<button class="btn ghost" id="readAll">Mark all as read</button>`:""}</div>
   <div class="grid g2"><div class="panel flush"><div class="list">${ns.map(x=>`<div class="li ${x.is_read?"":"unread"}"><div>${esc(x.message)}<br><span class="dim">${fmtDT(x.created_at)}</span></div>${badge(x.notification_type)}</div>`).join("")||`<div class="empty">You're all caught up.</div>`}</div></div>
   <div class="panel"><h2>Alert settings</h2>${sw("point_change_enabled","Point changes","When your sponsor adds or removes points")}${sw("order_summary_enabled","Order updates","When an order is placed, ships, or is cancelled")}${sw("drop_alert_enabled","Removed from a sponsor","Always on so you never miss it")}
+  <p class="dim" style="margin:8px 0 0">Security notices, like a password change, are always sent.</p>
   ${src("notification","alert_preference")}</div></div>`;
 };
 
 bind.driver.notifications = () => {
-  $("#readAll").onclick=()=>{DB.notification.filter(x=>x.user_id===ME.driver).forEach(x=>x.is_read=true); App.render();};
-  document.querySelectorAll("[data-pref]").forEach(c=>c.onchange=()=>{let pr=DB.alert_preference.find(x=>x.user_id===ME.driver); if(!pr){pr={user_id:ME.driver,point_change_enabled:true,order_summary_enabled:true,drop_alert_enabled:true}; DB.alert_preference.push(pr);} pr[c.dataset.pref]=c.checked; toast("Alert settings saved");});
+  if ($("#readAll")) $("#readAll").onclick = async () => {
+    try {
+      if (LIVE) await App.api("/api/driver/notifications/read-all", { method: "POST" });
+      else DB.notification.filter(x=>x.user_id===ME.driver).forEach(x=>x.is_read=true);
+      App.refresh();   // also redraws the sidebar's unread count
+    } catch (e) { toast(e.message); }
+  };
+  document.querySelectorAll("[data-pref]").forEach(c => c.onchange = async () => {
+    try {
+      if (LIVE) await App.api("/api/driver/alert-preferences", { method: "POST", body: { [c.dataset.pref]: c.checked } });
+      else { let pr = DB.alert_preference.find(x=>x.user_id===ME.driver);
+        if (!pr) { pr = { user_id: ME.driver, ...PREF_DEFAULTS }; DB.alert_preference.push(pr); }
+        pr[c.dataset.pref] = c.checked; }
+      toast("Alert settings saved");
+    } catch (e) { c.checked = !c.checked; toast(e.message); }
+  });
 };
 
 App.start("driver", "notifications");
