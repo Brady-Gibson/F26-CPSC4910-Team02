@@ -122,7 +122,7 @@ def reset_password(user_id):
                     "WHERE user_id = %s", (generate_password_hash(password), status, user_id))
         log_audit(cur, "ACCOUNT", True, actor_user_id=g.user["user_id"], subject_username=u["username"],
                   entity_type="USER_ACCOUNT", entity_id=user_id, details=PASSWORD_RESET)
-        notify(cur, user_id, "ACCOUNT", "An admin reset your password.")
+        notify(cur, user_id, "PASSWORD_RESET", "An admin reset your password. Sign in with the new password they gave you.")
     return jsonify(ok=True, account_status=status)
 
 
