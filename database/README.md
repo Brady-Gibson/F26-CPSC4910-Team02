@@ -20,7 +20,9 @@
 The local backend now uses DRIVER_SPONSOR for account assignment, approvals,
 drops, point changes, refunds, schedules, and driver commerce. Driver pages use
 scoped APIs and a sponsor selector; administrators can view and add memberships.
-**Neither the migration nor this application version has been deployed to RDS.**
+**Migration 002 was applied to the shared Team02_DB on MySQL 8.4.9 on
+October 20, 2026. Do not rerun it or load the fresh schema/seed into that database.**
+See `RC2_ROLLOUT.md` for the coordinated deployment and verification record.
 
 The old DRIVER sponsor/balance/status/date fields remain temporarily and are not
 synchronized. They are no longer authoritative. Keep them until every external
@@ -116,5 +118,7 @@ drops, refunds, session selection, admin assignments, checkout isolation,
 rollback, and replay protection. The legacy fixtures remain only for testing
 the upgrade migration.
 
-Local verification uses MySQL 9.5. CI is configured for MySQL 8.4; the remote CI
-run and migration rehearsal on the RDS version still need to pass before rollout.
+Local verification on MySQL 8.4.9 passed all 91 backend and database tests.
+The actual pre-migration backup was restored and migrated successfully on an
+isolated MySQL 8.4.9 server before the live cutover. CI is configured for MySQL
+8.4; this local result does not claim a remote CI run.

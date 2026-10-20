@@ -14,3 +14,6 @@ secrets.json
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Private database backups (may contain account data)
+database/backups/
