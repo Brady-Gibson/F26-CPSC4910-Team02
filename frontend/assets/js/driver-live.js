@@ -8,7 +8,9 @@ function installLiveDriverViews() {
   };
   VIEWS.driver.catalog = async () => {
     const { products } = await App.api('/api/driver/catalog');
-    return heading('Catalog') + `<div class="cards">${products.map(p => `<article class="item"><div class="bd">
+    return heading('Catalog') + `<div class="cards">${products.map(p => `<article class="item">${p.image_url
+        ? `<img src="${esc(p.image_url)}" alt="" loading="lazy" referrerpolicy="no-referrer" style="aspect-ratio:4/3;width:100%;object-fit:contain;background:#fff">`
+        : `<div class="ph">${esc(p.product_name)}</div>`}<div class="bd">
       <span class="nm">${esc(p.product_name)}</span><p>${esc(p.description)}</p><span class="pts">${n(p.point_price)} pts</span>
       <button class="btn go" data-live-add="${p.product_id}" ${p.availability !== 'AVAILABLE' || App.me.viewed_by ? 'disabled' : ''}>Add to cart</button>
       </div></article>`).join('') || '<p>No rewards available for this sponsor.</p>'}</div>`;

@@ -16,25 +16,67 @@
 <script src="../assets/js/mock-data.js"></script>
 <script src="../assets/js/app.js"></script>
 <script>
-/* LIVE: GET /api/sponsor/catalog, PUT /api/sponsor/catalog/<product_id> {point_price, is_active} */
+/* LIVE: GET /api/sponsor/catalog, PUT /api/sponsor/catalog/<product_id> {point_price, is_active}
+   eBay: GET /api/sponsor/catalog/ebay/search?q=&offset=, POST /api/sponsor/catalog/ebay {item_id, point_price},
+         POST /api/sponsor/catalog/ebay/refresh */
 
 function mockCatalog(){
   const s = sponsor(mySponsor());
-  return { sponsor: s, products: DB.product.map(p=>{ const ci=DB.catalog_item.find(c=>c.sponsor_id===s.sponsor_id&&c.product_id===p.product_id);
+  return { sponsor: s, ebay_enabled: false, products: DB.product.map(p=>{ const ci=DB.catalog_item.find(c=>c.sponsor_id===s.sponsor_id&&c.product_id===p.product_id);
     return { ...p, point_price: ci?.point_price ?? null, in_catalog: !!(ci&&ci.is_active) }; }) };
 }
 
+const img = (p, style) => p.image_url ? `<img src="${esc(p.image_url)}" alt="" loading="lazy" referrerpolicy="no-referrer" style="object-fit:contain;background:#fff;${style}">` : "";
+let ebayQuery = "", ebayOffset = 0;   // last search, kept across re-renders
+
 VIEWS.sponsor.catalog = async () => {
-  const { sponsor: s, products } = LIVE ? await App.api("/api/sponsor/catalog") : mockCatalog();
-  return `<div class="head"><div><h1>Catalog</h1><p class="sub">Pick products from the store feed. Point prices start at dollar price ÷ ${usd(s.point_dollar_rate)} and you can override them.</p></div></div>
+  const { sponsor: s, products, ebay_enabled } = LIVE ? await App.api("/api/sponsor/catalog") : mockCatalog();
+  const hasEbay = products.some(p=>p.api_source==="EBAY");
+  const search = ebay_enabled ? `<div class="panel"><h2>Add from eBay</h2>
+    <form class="row" id="ebayForm"><input type="search" id="ebayQ" placeholder="Search eBay, e.g. dash cam" aria-label="Search eBay" value="${esc(ebayQuery)}" style="flex:1" minlength="2" maxlength="100" required>
+    <button class="btn go" type="submit">Search</button></form><div id="ebayResults"></div></div>`
+    : `<div class="panel"><p class="dim">${LIVE ? "eBay search isn't set up on this server yet." : "eBay search needs the live server."}</p></div>`;
+  return `<div class="head"><div><h1>Catalog</h1><p class="sub">Add products from eBay. Point prices start at dollar price ÷ ${usd(s.point_dollar_rate)} and you can override them.</p></div>
+    ${ebay_enabled && hasEbay ? `<button class="btn ghost" id="ebayRefresh">Refresh prices from eBay</button>` : ""}</div>
+  ${search}
   <div class="panel flush"><div class="tw"><table><thead><tr><th>Product</th><th>Stock</th><th class="num">Store price</th><th class="num">Point price</th><th>In catalog</th></tr></thead><tbody>
   ${products.map(p=>{ const sugg=Math.ceil(p.dollar_price/s.point_dollar_rate-1e-9);
-    return `<tr><td><b>${esc(p.product_name)}</b><br><span class="dim">${esc(p.category)} · ${esc(p.external_product_id)}</span></td><td>${badge(p.availability)}</td><td class="num">${usd(p.dollar_price)}</td>
+    return `<tr><td><div class="row" style="flex-wrap:nowrap">${img(p, "width:48px;height:48px;border-radius:6px;flex:none")}<div><b>${esc(p.product_name)}</b><br><span class="dim">${esc(p.category)} · ${p.api_source==="EBAY" ? "eBay" : esc(p.external_product_id)}</span></div></div></td><td>${badge(p.availability)}</td><td class="num">${usd(p.dollar_price)}</td>
     <td class="num"><input type="number" min="1" style="width:100px;text-align:right" data-price="${p.product_id}" value="${p.point_price ?? sugg}" aria-label="Point price"></td>
     <td><input type="checkbox" data-in="${p.product_id}" ${p.in_catalog?"checked":""} aria-label="Show in catalog"></td></tr>`;}).join("")
-    || `<tr><td colspan="5" class="empty">No products in the store feed yet.</td></tr>`}
+    || `<tr><td colspan="5" class="empty">Nothing in your catalog yet. Search eBay above to add products.</td></tr>`}
   </tbody></table></div></div>${src("product","catalog_item")}`;
 };
+
+let ebayResults = [];
+async function searchEbay(offset = 0){
+  const box = $("#ebayResults"); ebayOffset = offset;
+  box.innerHTML = `<p class="dim">Searching eBay…</p>`;
+  try {
+    const r = await App.api(`/api/sponsor/catalog/ebay/search?q=${encodeURIComponent(ebayQuery)}&offset=${offset}`);
+    ebayResults = r.results;
+    box.innerHTML = !r.results.length ? `<p class="dim">No fixed-price eBay listings matched.</p>` :
+      `<p class="dim">${n(r.total)} results${r.total > r.results.length ? `, showing ${n(offset+1)}–${n(offset+r.results.length)}` : ""}</p>
+      <div class="cards">${r.results.map((p,i)=>`<article class="item">${img(p, "aspect-ratio:4/3;width:100%") || `<div class="ph">${esc(p.product_name)}</div>`}
+        <div class="bd"><span class="dim">${esc(p.category)}</span><span class="nm">${esc(p.product_name)}</span>
+        <span>${p.dollar_price == null ? "No USD price" : usd(p.dollar_price)}${p.item_web_url ? ` · <a href="${esc(p.item_web_url)}" target="_blank" rel="noopener">View on eBay</a>` : ""}</span>
+        <label class="dim">Point price <input type="number" min="1" style="width:100px;text-align:right" data-ebay-price="${i}" value="${p.suggested_points ?? ""}"></label>
+        ${p.in_catalog ? `<button class="btn ghost" type="button" disabled>In your catalog</button>`
+          : `<button class="btn go" type="button" data-ebay-add="${i}" ${p.availability!=="AVAILABLE"?"disabled":""}>${p.availability==="AVAILABLE"?"Add to catalog":"Unavailable"}</button>`}
+        </div></article>`).join("")}</div>
+      <div class="row">${offset ? `<button class="btn ghost" type="button" data-ebay-page="${offset-20}">Previous</button>` : ""}${offset + r.results.length < r.total ? `<button class="btn ghost" type="button" data-ebay-page="${offset+20}">Next</button>` : ""}</div>`;
+    box.querySelectorAll("[data-ebay-page]").forEach(b=>b.onclick=()=>searchEbay(+b.dataset.ebayPage));
+    box.querySelectorAll("[data-ebay-add]").forEach(b=>b.onclick=async()=>{
+      const i = b.dataset.ebayAdd, p = ebayResults[i], price = +box.querySelector(`[data-ebay-price="${i}"]`).value;
+      b.disabled = true;
+      try {
+        await App.api("/api/sponsor/catalog/ebay", { method: "POST", body: { item_id: p.external_product_id, point_price: price || null } });
+        toast(`Added ${p.product_name.slice(0, 60)}`);
+        await App.render();   // re-binds, which reruns the search
+      } catch (e) { toast(e.message); b.disabled = false; }
+    });
+  } catch (e) { box.innerHTML = `<p class="dim">${esc(e.message)}</p>`; }
+}
 
 // Saves both fields together, so the row in CATALOG_ITEM always matches what's on screen.
 async function saveItem(pid, msg){
@@ -52,6 +94,17 @@ async function saveItem(pid, msg){
 bind.sponsor.catalog = () => {
   document.querySelectorAll("[data-in]").forEach(c=>c.onchange=()=>saveItem(+c.dataset.in, c.checked?"Added to catalog":"Hidden from catalog"));
   document.querySelectorAll("[data-price]").forEach(i=>i.onchange=()=>saveItem(+i.dataset.price, "Point price saved"));
+  $("#ebayForm")?.addEventListener("submit", e => { e.preventDefault(); ebayQuery = $("#ebayQ").value.trim(); searchEbay(); });
+  if (ebayQuery && $("#ebayResults")) searchEbay(ebayOffset);
+  const refresh = $("#ebayRefresh");
+  if (refresh) refresh.onclick = async () => {
+    refresh.disabled = true; refresh.textContent = "Refreshing…";
+    try {
+      const r = await App.api("/api/sponsor/catalog/ebay/refresh", { method: "POST" });
+      toast(`Updated ${n(r.refreshed)} items${r.unavailable ? `, ${n(r.unavailable)} unavailable` : ""}`);
+      await App.render();
+    } catch (e) { toast(e.message); refresh.disabled = false; refresh.textContent = "Refresh prices from eBay"; }
+  };
 };
 
 App.start("sponsor", "catalog");

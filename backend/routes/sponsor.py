@@ -18,8 +18,11 @@ Recurring points (sponsor/schedules.html)
     POST /api/sponsor/schedules/<id>/active           {"is_active": true|false}
 
 Catalog (sponsor/catalog.html)
-    GET  /api/sponsor/catalog                         every product + my point price / in-catalog flag
+    GET  /api/sponsor/catalog                         my catalog + non-eBay feed products, with point price / in-catalog flag
     PUT  /api/sponsor/catalog/<product_id>            {"point_price": 500, "is_active": true}
+    GET  /api/sponsor/catalog/ebay/search?q=&offset=  eBay listings (not saved), flagged if already in my catalog
+    POST /api/sponsor/catalog/ebay                    {"item_id": "v1|...|0", "point_price": 500 (optional)}
+    POST /api/sponsor/catalog/ebay/refresh            re-fetch price + stock from eBay for my eBay products
 
 Orders (sponsor/orders.html)
     GET  /api/sponsor/orders                          my drivers' orders with their items
@@ -36,6 +39,7 @@ from decimal import Decimal, InvalidOperation
 
 from flask import Blueprint, g, jsonify, request
 
+import ebay
 from accounts import EMAIL_RE
 from audit import log_audit, notify
 from auth import require_role
@@ -322,14 +326,17 @@ def catalog():
     sid = g.user["sponsor_id"]
     sponsor = query("SELECT sponsor_id, sponsor_name, point_dollar_rate FROM SPONSOR_ORGANIZATION WHERE sponsor_id = %s",
                     (sid,), one=True)
+    # eBay products are shared rows (one per listing), so only show the ones this sponsor has added.
     products = query(
         """SELECT p.product_id, p.product_name, p.category, p.external_product_id, p.availability, p.dollar_price,
+                  p.api_source, p.image_url, p.last_refreshed_at,
                   c.point_price, COALESCE(c.is_active, FALSE) AS in_catalog
              FROM PRODUCT p
              LEFT JOIN CATALOG_ITEM c ON c.product_id = p.product_id AND c.sponsor_id = %s
+            WHERE c.sponsor_id IS NOT NULL OR COALESCE(p.api_source, '') <> 'EBAY'
             ORDER BY p.category, p.product_name""",
         (sid,))
-    return jsonify(sponsor=sponsor, products=products)
+    return jsonify(sponsor=sponsor, products=products, ebay_enabled=ebay.configured())
 
 
 @bp.put("/catalog/<int:product_id>")
@@ -355,6 +362,122 @@ def set_catalog_item(product_id):
         log_audit(cur, "CATALOG", True, actor_user_id=me, sponsor_id=sid, entity_type="PRODUCT", entity_id=product_id,
                   details=f"{product['product_name'][:200]}: {price:,} pts, {'in catalog' if is_active else 'hidden'}")
     return jsonify(ok=True, product_id=product_id, point_price=price, is_active=is_active)
+
+
+def _suggested_points(dollar_price, rate):
+    """Dollar price / point value, rounded up. None if either is missing."""
+    if dollar_price is None or not rate or rate <= 0:
+        return None
+    return max(1, int(-(-Decimal(dollar_price) // Decimal(rate))))
+
+
+def _save_ebay_product(cur, item):
+    """Insert or update the shared PRODUCT row for an eBay listing. Returns product_id."""
+    cur.execute(
+        """INSERT INTO PRODUCT (api_source, external_product_id, product_name, description, dollar_price,
+                                availability, image_url, category, last_refreshed_at)
+           VALUES ('EBAY', %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+           ON DUPLICATE KEY UPDATE product_name = VALUES(product_name), description = VALUES(description),
+               dollar_price = VALUES(dollar_price), availability = VALUES(availability),
+               image_url = VALUES(image_url), category = VALUES(category), last_refreshed_at = CURRENT_TIMESTAMP""",
+        (item["external_product_id"], item["product_name"], item["description"], item["dollar_price"],
+         item["availability"], item["image_url"], item["category"]))
+    cur.execute("SELECT product_id FROM PRODUCT WHERE external_product_id = %s", (item["external_product_id"],))
+    return cur.fetchone()["product_id"]
+
+
+@bp.get("/catalog/ebay/search")
+@require_role("sponsor")
+def ebay_search():
+    q = (request.args.get("q") or "").strip()
+    if not 2 <= len(q) <= 100:
+        return jsonify(error="Search for 2 to 100 characters."), 400
+    try:
+        offset = max(0, min(int(request.args.get("offset", 0)), 9_980))
+    except ValueError:
+        offset = 0
+    try:
+        results, total = ebay.search(q, limit=20, offset=offset)
+    except ebay.EbayError as e:
+        return jsonify(error=str(e)), e.status
+    rate = query("SELECT point_dollar_rate FROM SPONSOR_ORGANIZATION WHERE sponsor_id = %s",
+                 (g.user["sponsor_id"],), one=True)["point_dollar_rate"]
+    mine = {r["external_product_id"] for r in query(
+        """SELECT p.external_product_id FROM CATALOG_ITEM c JOIN PRODUCT p USING (product_id)
+            WHERE c.sponsor_id = %s AND c.is_active = TRUE AND p.api_source = 'EBAY'""", (g.user["sponsor_id"],))}
+    for r in results:
+        r["suggested_points"] = _suggested_points(r["dollar_price"], rate)
+        r["in_catalog"] = r["external_product_id"] in mine
+    return jsonify(results=results, total=total, offset=offset)
+
+
+@bp.post("/catalog/ebay")
+@require_role("sponsor")
+def add_ebay_item():
+    data = request.get_json(silent=True) or {}
+    me, sid = g.user["user_id"], g.user["sponsor_id"]
+    item_id = data.get("item_id")
+    if not isinstance(item_id, str) or not 1 <= len(item_id) <= 200:
+        return jsonify(error="Provide the eBay item_id."), 400
+    price = None
+    if data.get("point_price") is not None:
+        price, problem = _whole_number(data["point_price"], "Point price")
+        if problem:
+            return jsonify(error=problem), 400
+    # Re-fetch from eBay rather than trusting the browser's copy of the price.
+    try:
+        item = ebay.get_item(item_id)
+    except ebay.EbayError as e:
+        return jsonify(error=str(e)), e.status
+    if item["availability"] != "AVAILABLE":
+        return jsonify(error="That listing is out of stock or not priced in US dollars."), 400
+    with transaction() as cur:
+        cur.execute("SELECT point_dollar_rate FROM SPONSOR_ORGANIZATION WHERE sponsor_id = %s", (sid,))
+        suggested = _suggested_points(item["dollar_price"], cur.fetchone()["point_dollar_rate"])
+        if price is None and suggested is None:
+            return jsonify(error="Set a point price for this item."), 400
+        product_id = _save_ebay_product(cur, item)
+        # Re-adding an item keeps the sponsor's earlier point price unless they send a new one.
+        cur.execute(
+            """INSERT INTO CATALOG_ITEM (sponsor_id, product_id, point_price, is_active) VALUES (%s, %s, %s, TRUE)
+               ON DUPLICATE KEY UPDATE is_active = TRUE""" + (", point_price = VALUES(point_price)" if price else ""),
+            (sid, product_id, price or suggested))
+        cur.execute("SELECT point_price FROM CATALOG_ITEM WHERE sponsor_id = %s AND product_id = %s", (sid, product_id))
+        final = cur.fetchone()["point_price"]
+        log_audit(cur, "CATALOG", True, actor_user_id=me, sponsor_id=sid, entity_type="PRODUCT", entity_id=product_id,
+                  details=f"Added from eBay: {item['product_name'][:180]}: {final:,} pts")
+    return jsonify(ok=True, product_id=product_id, point_price=final), 201
+
+
+@bp.post("/catalog/ebay/refresh")
+@require_role("sponsor")
+def refresh_ebay_items():
+    sid = g.user["sponsor_id"]
+    rows = query(
+        """SELECT p.product_id, p.external_product_id FROM CATALOG_ITEM c JOIN PRODUCT p USING (product_id)
+            WHERE c.sponsor_id = %s AND p.api_source = 'EBAY' ORDER BY p.last_refreshed_at LIMIT 100""", (sid,))
+    # Call eBay before opening the transaction so no rows stay locked during network requests.
+    fresh, gone = [], []
+    try:
+        for r in rows:
+            try:
+                fresh.append(ebay.get_item(r["external_product_id"]))
+            except ebay.EbayError as e:
+                if e.status != 404:
+                    raise
+                gone.append(r["product_id"])
+    except ebay.EbayError as e:
+        return jsonify(error=str(e)), e.status
+    with transaction() as cur:
+        for item in fresh:
+            _save_ebay_product(cur, item)
+        for product_id in gone:
+            cur.execute("""UPDATE PRODUCT SET availability = 'UNAVAILABLE', last_refreshed_at = CURRENT_TIMESTAMP
+                            WHERE product_id = %s""", (product_id,))
+        log_audit(cur, "CATALOG", True, actor_user_id=g.user["user_id"], sponsor_id=sid,
+                  details=f"Refreshed {len(rows)} eBay items ({len(gone)} no longer listed)")
+    return jsonify(ok=True, refreshed=len(fresh), unavailable=len(gone)
+                   + sum(i["availability"] != "AVAILABLE" for i in fresh))
 
 
 # ---------------------------------------------------------------- Orders
