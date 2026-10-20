@@ -14,10 +14,10 @@ Notifications
     POST /api/driver/alert-preferences          save alert settings (drop alerts can't be turned off)
 
 Stories covered here: Sponsor Incentive Program, Driver Application Status, Rejection Reason
-Statement, Required Information, One Sponsor, Recorded Application. The two alert stories
+Statement, Required Information, Multiple Sponsors, Recorded Application. The two alert stories
 (Application Alert / Application Rejection Alert) happen when the sponsor decides, in routes/sponsor.py.
 """
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, g, jsonify, request, session
 
 from audit import log_audit
 from auth import require_role
@@ -31,29 +31,34 @@ bp = Blueprint("driver", __name__, url_prefix="/api/driver")
 def dashboard():
     """Example read endpoint. Feeds frontend/driver/dashboard.html."""
     uid = g.user["user_id"]
+    sid = g.user["sponsor_id"]
     driver = query(
         """SELECT d.driver_id, u.first_name, u.last_name, d.current_points, d.participation_status,
                   d.sponsor_id, s.sponsor_name, s.point_dollar_rate
-             FROM DRIVER d
+             FROM DRIVER_SPONSOR d
              JOIN USER_ACCOUNT u ON u.user_id = d.driver_id
              LEFT JOIN SPONSOR_ORGANIZATION s ON s.sponsor_id = d.sponsor_id
-            WHERE d.driver_id = %s""", (uid,), one=True)
+            WHERE d.driver_id = %s AND d.sponsor_id = %s""", (uid, sid), one=True)
+    if driver is None:
+        driver = dict(driver_id=uid, first_name=g.user["first_name"], last_name=g.user["last_name"],
+                      current_points=0, participation_status="APPLICANT", sponsor_id=None,
+                      sponsor_name=None, point_dollar_rate=None)
     transactions = query(
         """SELECT pt.point_transaction_id, pt.points_delta, pt.balance_after, pt.reason, pt.created_at,
                   p.first_name AS by_first_name, p.last_name AS by_last_name
              FROM POINT_TRANSACTION pt
              LEFT JOIN USER_ACCOUNT p ON p.user_id = pt.performed_by_user_id
-            WHERE pt.driver_id = %s
+            WHERE pt.driver_id = %s AND pt.sponsor_id = %s
             ORDER BY pt.created_at DESC, pt.point_transaction_id DESC
-            LIMIT 5""", (uid,))
+            LIMIT 5""", (uid, sid))
     open_orders = query(
         """SELECT order_id, status, total_points, placed_at FROM CUSTOMER_ORDER
-            WHERE driver_id = %s AND status IN ('PLACED', 'SHIPPED')
-            ORDER BY placed_at DESC""", (uid,))
+            WHERE driver_id = %s AND sponsor_id = %s AND status IN ('PLACED', 'SHIPPED')
+            ORDER BY placed_at DESC""", (uid, sid))
     next_award = query(
         """SELECT points_amount, next_run_at FROM RECURRING_POINT_SCHEDULE
-            WHERE driver_id = %s AND is_active = TRUE AND next_run_at IS NOT NULL
-            ORDER BY next_run_at LIMIT 1""", (uid,), one=True)
+            WHERE driver_id = %s AND sponsor_id = %s AND is_active = TRUE AND next_run_at IS NOT NULL
+            ORDER BY next_run_at LIMIT 1""", (uid, sid), one=True)
     return jsonify(driver=driver, transactions=transactions, open_orders=open_orders, next_award=next_award)
 
 
@@ -100,12 +105,15 @@ def _clean_application(data):
 @bp.get("/sponsors")
 @require_role("driver")
 def sponsors():
-    """Active sponsor organizations, minus the one the driver is already with."""
+    """Active organizations excluding existing active memberships and pending applications."""
     rows = query(
-        """SELECT sponsor_id, sponsor_name FROM SPONSOR_ORGANIZATION
-            WHERE status = 'ACTIVE' AND sponsor_id <> COALESCE(%s, 0)
-            ORDER BY sponsor_name""",
-        (g.user["sponsor_id"],))
+        """SELECT s.sponsor_id, s.sponsor_name FROM SPONSOR_ORGANIZATION s
+            WHERE s.status = 'ACTIVE' AND NOT EXISTS
+              (SELECT 1 FROM DRIVER_SPONSOR m WHERE m.driver_id = %s
+               AND m.sponsor_id = s.sponsor_id AND m.participation_status = 'ACTIVE')
+            AND NOT EXISTS (SELECT 1 FROM DRIVER_APPLICATION a WHERE a.driver_id = %s
+               AND a.sponsor_id = s.sponsor_id AND a.status = 'PENDING')
+            ORDER BY s.sponsor_name""", (g.user["user_id"], g.user["user_id"]))
     return jsonify(sponsors=rows)
 
 
@@ -129,7 +137,7 @@ def applications():
 @bp.post("/applications")
 @require_role("driver")
 def apply():
-    """Sponsor Incentive Program + Required Information + One Sponsor + Recorded Application."""
+    """Create a pending application for this sponsor only."""
     values, problem = _clean_application(request.get_json(silent=True) or {})
     if problem:
         return jsonify(error=problem), 400
@@ -137,7 +145,7 @@ def apply():
     driver_id, username = g.user["user_id"], g.user["username"]
     with transaction() as cur:
         # Lock the driver row so a double-click can't create two applications.
-        cur.execute("SELECT sponsor_id, participation_status FROM DRIVER WHERE driver_id = %s FOR UPDATE",
+        cur.execute("SELECT driver_id FROM DRIVER WHERE driver_id = %s FOR UPDATE",
                     (driver_id,))
         driver = cur.fetchone()
 
@@ -147,15 +155,16 @@ def apply():
         if sponsor is None:
             return jsonify(error="That sponsor isn't accepting applications."), 404
 
-        # One Sponsor rule
         blocked = None
-        if driver["sponsor_id"] is not None and driver["participation_status"] == "ACTIVE":
-            blocked = "You already have a sponsor. Drivers can only be with one sponsor at a time."
+        cur.execute("""SELECT 1 FROM DRIVER_SPONSOR WHERE driver_id = %s AND sponsor_id = %s
+                       AND participation_status = 'ACTIVE'""", (driver_id, values["sponsor_id"]))
+        if cur.fetchone():
+            blocked = "You already belong to this sponsor."
         else:
-            cur.execute("SELECT 1 FROM DRIVER_APPLICATION WHERE driver_id = %s AND status = 'PENDING' LIMIT 1",
-                        (driver_id,))
+            cur.execute("""SELECT 1 FROM DRIVER_APPLICATION WHERE driver_id = %s AND sponsor_id = %s
+                           AND status = 'PENDING' LIMIT 1""", (driver_id, values["sponsor_id"]))
             if cur.fetchone():
-                blocked = "You already have an application waiting for review."
+                blocked = "You already have an application waiting for this sponsor."
         if blocked:
             log_audit(cur, "APPLICATION", False, actor_user_id=driver_id, sponsor_id=values["sponsor_id"],
                       driver_id=driver_id, subject_username=username, entity_type="DRIVER_APPLICATION",
@@ -237,3 +246,22 @@ def save_alert_preferences():
                   details="Alert settings: " + ", ".join(f"{k.replace('_enabled', '').replace('_', ' ')} "
                                                          f"{'on' if v else 'off'}" for k, v in prefs.items()))
     return jsonify(ok=True, preferences=prefs)
+
+
+@bp.get("/memberships")
+@require_role("driver")
+def memberships():
+    return jsonify(memberships=g.user["memberships"], selected_sponsor_id=g.user["sponsor_id"])
+
+
+@bp.post("/selected-sponsor")
+@require_role("driver")
+def select_sponsor():
+    sid = (request.get_json(silent=True) or {}).get("sponsor_id")
+    if type(sid) is not int:
+        return jsonify(error="sponsor_id must be an integer."), 400
+    if not any(m["sponsor_id"] == sid and m["participation_status"] == "ACTIVE"
+               and m["sponsor_status"] == "ACTIVE" for m in g.user["memberships"]):
+        return jsonify(error="Active membership not found."), 404
+    session["selected_sponsor_" + str(g.user["user_id"])] = sid
+    return jsonify(ok=True, selected_sponsor_id=sid)

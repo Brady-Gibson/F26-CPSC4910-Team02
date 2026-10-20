@@ -74,13 +74,18 @@ SET sponsor_id = 900001,
 WHERE driver_id = 900003;
 
 
+INSERT INTO DRIVER_SPONSOR
+(driver_id, sponsor_id, current_points, participation_status, joined_at)
+SELECT driver_id, sponsor_id, current_points, participation_status, joined_at
+FROM DRIVER WHERE sponsor_id IS NOT NULL;
+
 -- =====================================================
 -- POINTS
 -- =====================================================
 
-UPDATE DRIVER
+UPDATE DRIVER_SPONSOR
 SET current_points = 1000
-WHERE driver_id = 900003;
+WHERE driver_id = 900003 AND sponsor_id = 900001;
 
 INSERT INTO POINT_TRANSACTION
 (point_transaction_id, driver_id, sponsor_id,
@@ -165,9 +170,9 @@ UPDATE SHOPPING_CART
 SET status = 'CHECKED_OUT'
 WHERE cart_id = 900001;
 
-UPDATE DRIVER
+UPDATE DRIVER_SPONSOR
 SET current_points = 500
-WHERE driver_id = 900003;
+WHERE driver_id = 900003 AND sponsor_id = 900001;
 
 INSERT INTO POINT_TRANSACTION
 (point_transaction_id, driver_id, sponsor_id,
@@ -232,3 +237,20 @@ VALUES
  CURRENT_DATE,
  'Good Driver Incentive Program',
  'Team 02 test release');
+
+-- RC#2: the same driver participates in another independent program.
+INSERT INTO SPONSOR_ORGANIZATION
+(sponsor_id, sponsor_name, status, point_dollar_rate)
+VALUES (900010, 'Second RC2 Test Sponsor', 'ACTIVE', 0.02);
+INSERT INTO DRIVER_SPONSOR
+(driver_id, sponsor_id, current_points, participation_status)
+VALUES (900003, 900010, 200, 'ACTIVE');
+INSERT INTO POINT_TRANSACTION
+(driver_id, sponsor_id, performed_by_user_id, points_delta, balance_after, reason)
+VALUES (900003, 900010, 900001, 200, 200, 'Second sponsor welcome award');
+INSERT INTO CATALOG_ITEM (sponsor_id, product_id, point_price, is_active)
+VALUES (900010, 900001, 250, TRUE);
+INSERT INTO SHOPPING_CART (driver_id, sponsor_id, status)
+VALUES (900003, 900010, 'ACTIVE');
+-- Temporary legacy snapshot for backend tests during the application transition.
+UPDATE DRIVER SET current_points = 500 WHERE driver_id = 900003;

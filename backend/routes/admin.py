@@ -28,13 +28,20 @@ def users():
                   CASE WHEN a.admin_id IS NOT NULL THEN 'admin'
                        WHEN su.sponsor_user_id IS NOT NULL THEN 'sponsor'
                        WHEN d.driver_id IS NOT NULL THEN 'driver' END AS role,
-                  COALESCE(su.sponsor_id, d.sponsor_id) AS sponsor_id, s.sponsor_name
+                  su.sponsor_id AS sponsor_id, s.sponsor_name
              FROM USER_ACCOUNT u
              LEFT JOIN ADMIN a ON a.admin_id = u.user_id
              LEFT JOIN SPONSOR_USER su ON su.sponsor_user_id = u.user_id
              LEFT JOIN DRIVER d ON d.driver_id = u.user_id
-             LEFT JOIN SPONSOR_ORGANIZATION s ON s.sponsor_id = COALESCE(su.sponsor_id, d.sponsor_id)
+             LEFT JOIN SPONSOR_ORGANIZATION s ON s.sponsor_id = su.sponsor_id
             ORDER BY u.user_id""")
+    memberships = query("""SELECT m.*, s.sponsor_name FROM DRIVER_SPONSOR m
+        JOIN SPONSOR_ORGANIZATION s USING (sponsor_id) ORDER BY m.sponsor_id""")
+    for row in rows:
+        if row["role"] == "driver":
+            row["memberships"] = [m for m in memberships if m["driver_id"] == row["user_id"]]
+            row["sponsor_name"] = ", ".join(m["sponsor_name"] for m in row["memberships"]
+                                           if m["participation_status"] == "ACTIVE") or None
     sponsors = query("SELECT sponsor_id, sponsor_name, status FROM SPONSOR_ORGANIZATION ORDER BY sponsor_name")
     return jsonify(users=rows, sponsors=sponsors)
 
@@ -165,3 +172,45 @@ def create_sponsor():
                   details=f"Created sponsor {name} (1 point = ${rate})")
 
     return jsonify(ok=True, sponsor_id=sponsor_id), 201
+
+
+@bp.get('/drivers/<int:driver_id>/sponsors')
+@require_role('admin')
+def driver_sponsors(driver_id):
+    rows = query('''SELECT m.*, s.sponsor_name FROM DRIVER_SPONSOR m
+        JOIN SPONSOR_ORGANIZATION s USING (sponsor_id) WHERE m.driver_id = %s
+        ORDER BY m.sponsor_id''', (driver_id,))
+    return jsonify(memberships=rows)
+
+
+@bp.post('/drivers/<int:driver_id>/sponsors')
+@require_role('admin')
+def assign_sponsors(driver_id):
+    """Add memberships without replacing any existing sponsor or its balance."""
+    data = request.get_json(silent=True) or {}
+    ids = data.get('sponsor_ids', [data.get('sponsor_id')])
+    if not isinstance(ids, list) or not ids or any(type(s) is not int or s <= 0 for s in ids):
+        return jsonify(error='Provide a nonempty list of integer sponsor_ids.'), 400
+    try:
+        with transaction() as cur:
+            cur.execute('SELECT driver_id FROM DRIVER WHERE driver_id = %s FOR UPDATE', (driver_id,))
+            if cur.fetchone() is None:
+                return jsonify(error='Driver not found.'), 404
+            for sid in sorted(set(ids)):
+                cur.execute("SELECT sponsor_name FROM SPONSOR_ORGANIZATION WHERE sponsor_id = %s AND status = 'ACTIVE'", (sid,))
+                org = cur.fetchone()
+                if org is None:
+                    raise AccountError('Every sponsor must exist and be active.')
+                cur.execute('''INSERT INTO DRIVER_SPONSOR (driver_id, sponsor_id, participation_status)
+                    VALUES (%s, %s, 'ACTIVE') ON DUPLICATE KEY UPDATE participation_status = 'ACTIVE' ''', (driver_id, sid))
+                cur.execute('''UPDATE DRIVER_APPLICATION SET status = 'APPROVED', decision_at = CURRENT_TIMESTAMP,
+                    decided_by_user_id = %s, reason = 'Assigned by admin'
+                    WHERE driver_id = %s AND sponsor_id = %s AND status = 'PENDING' ''',
+                    (g.user['user_id'], driver_id, sid))
+                log_audit(cur, 'APPLICATION', True, actor_user_id=g.user['user_id'], driver_id=driver_id,
+                          sponsor_id=sid, entity_type='DRIVER_SPONSOR', entity_id=driver_id,
+                          details='Membership assigned by admin')
+                notify(cur, driver_id, 'APPLICATION_APPROVED', f"An administrator assigned you to {org['sponsor_name']}.")
+    except AccountError as e:
+        return jsonify(error=str(e)), 400
+    return jsonify(ok=True)

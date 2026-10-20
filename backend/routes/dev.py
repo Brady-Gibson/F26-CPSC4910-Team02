@@ -4,6 +4,7 @@ import os
 
 from flask import Blueprint, abort, jsonify
 
+from auth import require_role
 from db import get_db_connection
 
 bp = Blueprint("dev", __name__, url_prefix="/api")
@@ -15,6 +16,7 @@ TABLES = ["USER_ACCOUNT", "ADMIN", "SPONSOR_ORGANIZATION", "SPONSOR_USER", "DRIV
 
 
 @bp.get("/bootstrap")
+@require_role("admin")
 def bootstrap():
     if os.getenv("APP_ENV", "development") == "production":
         abort(404)

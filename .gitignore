@@ -9,3 +9,11 @@
 *.cert
 credentials.json
 secrets.json
+
+# Generated Python test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Private database backups (may contain account data)
+database/backups/

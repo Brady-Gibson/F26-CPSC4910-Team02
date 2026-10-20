@@ -30,7 +30,7 @@ Without `TEST_DB_HOST` set, the database tests are skipped. GitHub Actions runs 
 
 Watch it on GitHub → **Actions** → **Test and deploy**. A red run means the deploy failed (the log shows the Beanstalk events). To redeploy without a new commit: Actions → Test and deploy → **Run workflow** on `main`.
 
-**Before merging code that needs a new migration** (`database/migrations/NNN_*.sql`), run the migration on RDS in Workbench. The workflow does not run migrations.
+**For RC#2, coordinate migration and deployment with writers paused**, following database/README.md. Do not run migration 002 while the old application keeps writing. The workflow does not run migrations.
 
 ### Manual fallback
 Only if Actions can't deploy (for example, it's down, or you need to ship something that isn't on `main`):
@@ -40,3 +40,30 @@ python scripts/make_deploy_zip.py
 Then Beanstalk console → Team02-gdip-env → **Upload and deploy** → choose `backend/deploy.zip` with a new version label.
 
 Secrets (database credentials, `SECRET_KEY`) live in the Beanstalk environment properties, not in the zip or the repo. The workflow never changes them. The AWS key the workflow deploys with is stored in GitHub → Settings → Environments → **production** (secrets `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`), which only the `main` branch can use.
+
+## RC#2 database work
+
+See `../database/README.md` before applying the multiple-sponsor migration.
+The backend now reads and writes membership balances in DRIVER_SPONSOR, not the
+legacy DRIVER fields. Tests use the current schema and two memberships for the
+seed driver. Do not deploy this code against an unmigrated database.
+
+Driver endpoints added:
+- `GET /api/driver/memberships`, `POST /api/driver/selected-sponsor` with integer `sponsor_id`.
+- `GET /api/driver/catalog`, `/cart`, `/orders`, `/points`: selected sponsor only.
+- `PUT /api/driver/cart/items/<product_id>` with integer `quantity` (0 removes).
+- `POST /api/driver/checkout` with integer `cart_id`: locks membership/cart, checks
+  current price and availability, debits only that sponsor, writes ledger and
+  order atomically, rejects a repeated checkout.
+- `GET /api/admin/drivers/<driver_id>/sponsors` lists every membership.
+- `POST` to that URL accepts `sponsor_id` or `sponsor_ids` and adds/restores
+  memberships without overwriting other balances. A batch is all-or-nothing.
+
+For local isolated socket tests set TEST_DB_SOCKET in addition to TEST_DB_HOST,
+TEST_DB_USER and TEST_DB_PASSWORD. DB_SOCKET is the application's optional socket
+setting. Do not point tests at a shared database: tests recreate TEST_DB_NAME.
+
+The local-file demo retains its original single-sponsor mock data. Live driver
+pages use the new APIs. Admin pages other than Users still have their preexisting
+development-bootstrap dependency; this change does not convert those unrelated
+pages or add a recurring-schedule execution service.

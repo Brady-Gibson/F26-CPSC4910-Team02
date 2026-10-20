@@ -31,6 +31,10 @@ os.environ.update(DB_HOST=os.environ["TEST_DB_HOST"], DB_USER=os.environ["TEST_D
                   APP_ENV="development")
 
 
+if os.getenv("TEST_DB_SOCKET"):
+    os.environ["DB_SOCKET"] = os.environ["TEST_DB_SOCKET"]
+
+
 def _run_sql_file(cur, path):
     sql = Path(path).read_text()
     sql = re.sub(r"(?im)^\s*USE\s+\w+\s*;", "", sql)      # always stay in the test database
@@ -43,7 +47,8 @@ def _run_sql_file(cur, path):
 def _connect(**kw):
     return mysql.connector.connect(host=os.environ["TEST_DB_HOST"], user=os.environ["TEST_DB_USER"],
                                    password=os.environ["TEST_DB_PASSWORD"],
-                                   port=int(os.environ.get("TEST_DB_PORT", 3306)), autocommit=True, **kw)
+                                   port=int(os.environ.get("TEST_DB_PORT", 3306)), autocommit=True,
+                                   **({"unix_socket": os.environ["TEST_DB_SOCKET"]} if os.getenv("TEST_DB_SOCKET") else {}), **kw)
 
 
 @pytest.fixture()
@@ -57,8 +62,6 @@ def app():
     cur.execute(f"USE {DB_NAME}")
     _run_sql_file(cur, DATABASE / "schema.sql")
     _run_sql_file(cur, DATABASE / "seed_test_data.sql")
-    for migration in sorted((DATABASE / "migrations").glob("*.sql")):
-        _run_sql_file(cur, migration)
     # Extra rows: a second sponsor org + its sponsor user, and a driver with no sponsor yet.
     cur.execute("""INSERT INTO SPONSOR_ORGANIZATION (sponsor_id, sponsor_name, status, point_dollar_rate)
                    VALUES (900002, 'Second Test Freight', 'ACTIVE', 0.01)""")

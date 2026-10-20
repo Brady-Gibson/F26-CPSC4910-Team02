@@ -69,7 +69,7 @@ application.register_blueprint(auth.bp)
 application.register_blueprint(dev.bp)
 
 # Role routes: uncomment your two lines when you add your routes file.
-from routes import driver
+from routes import driver, driver_commerce
 application.register_blueprint(driver.bp)
 from routes import sponsor
 application.register_blueprint(sponsor.bp)

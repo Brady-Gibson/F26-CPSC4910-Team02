@@ -34,7 +34,7 @@ def test_users_list_includes_sponsors_and_no_password(client):
     data = client.get("/api/admin/users").get_json()
     assert any(s["sponsor_id"] == 900001 for s in data["sponsors"])
     driver = next(u for u in data["users"] if u["username"] == "testdriver")
-    assert driver["role"] == "driver" and driver["sponsor_name"] == "Tiger Test Trucking"
+    assert driver["role"] == "driver" and {m["sponsor_id"] for m in driver["memberships"]} == {900001, 900010}
     assert all("password_hash" not in u for u in data["users"])
 
 
@@ -52,7 +52,7 @@ def test_admin_creates_sponsor_user_who_can_sign_in(client, db):
 def test_admin_creates_driver_with_and_without_sponsor(client, db):
     as_admin(client)
     r = client.post("/api/admin/users", json=new_account(role="driver", username="drv1", email="d1@example.com"))
-    assert one(db, "SELECT * FROM DRIVER WHERE driver_id=%s", r.get_json()["user_id"])["participation_status"] == "ACTIVE"
+    assert one(db, "SELECT * FROM DRIVER_SPONSOR WHERE driver_id=%s", r.get_json()["user_id"])["participation_status"] == "ACTIVE"
     r = client.post("/api/admin/users", json=new_account(role="driver", sponsor_id=None, username="drv2", email="d2@example.com"))
     row = one(db, "SELECT * FROM DRIVER WHERE driver_id=%s", r.get_json()["user_id"])
     assert row["participation_status"] == "APPLICANT" and row["sponsor_id"] is None

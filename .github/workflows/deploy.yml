@@ -53,6 +53,13 @@ jobs:
           TEST_DB_PASSWORD: ci-only
         run: python -m pytest tests -v
 
+      - name: Test RC2 database schema and upgrade
+        env:
+          RC2_TEST_HOST: 127.0.0.1
+          RC2_TEST_USER: root
+          RC2_TEST_PASSWORD: ci-only
+        run: python -m pytest database/tests -v
+
   deploy:
     needs: test
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
