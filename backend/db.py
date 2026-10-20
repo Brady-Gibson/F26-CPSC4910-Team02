@@ -28,6 +28,7 @@ def _get_pool():
             password=os.getenv("DB_PASSWORD"),
             database=os.getenv("DB_NAME"),
             port=int(os.getenv("DB_PORT", 3306)),
+            **({"unix_socket": os.environ["DB_SOCKET"]} if os.getenv("DB_SOCKET") else {}),
             autocommit=True,  # plain reads don't hold transactions open; transaction() starts one explicitly
         )
     return _pool

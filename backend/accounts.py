@@ -115,8 +115,10 @@ def create_user(cur, role, *, username, password, first_name, last_name, email,
         cur.execute("INSERT INTO SPONSOR_USER (sponsor_user_id, sponsor_id, job_title) VALUES (%s, %s, %s)",
                     (user_id, sponsor_id, job_title))
     else:
-        cur.execute("INSERT INTO DRIVER (driver_id, sponsor_id, current_points, participation_status) "
-                    "VALUES (%s, %s, 0, %s)", (user_id, sponsor_id, "ACTIVE" if sponsor_id else "APPLICANT"))
+        cur.execute("INSERT INTO DRIVER (driver_id, participation_status) VALUES (%s, 'APPLICANT')", (user_id,))
+        if sponsor_id is not None:
+            cur.execute("INSERT INTO DRIVER_SPONSOR (driver_id, sponsor_id, participation_status) "
+                        "VALUES (%s, %s, 'ACTIVE')", (user_id, sponsor_id))
 
     cur.execute("INSERT INTO ALERT_PREFERENCE (user_id) VALUES (%s)", (user_id,))
 

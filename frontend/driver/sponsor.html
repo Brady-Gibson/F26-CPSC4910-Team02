@@ -15,6 +15,7 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script src="../assets/js/mock-data.js"></script>
 <script src="../assets/js/app.js"></script>
+<script src="../assets/js/driver-live.js"></script>
 <script>
 /* Driver Sponsor Application (Sprint 3)
    LIVE: GET /api/driver/sponsors, GET /api/driver/applications, POST /api/driver/applications
@@ -38,8 +39,8 @@ async function loadSponsorPage(){
 VIEWS.driver.sponsor = async () => {
   const { sponsors, applications, current } = await loadSponsorPage();
   const pending = applications.some(a=>a.status==="PENDING");
-  const canApply = !current && !pending && sponsors.length > 0;
-  const why = current ? "You already have a sponsor. Drivers can only be with one sponsor at a time."
+  const canApply = LIVE ? sponsors.length > 0 : !current && !pending && sponsors.length > 0;
+  const why = LIVE ? "No additional sponsors are available to apply to right now." : current ? "You already have a sponsor. Drivers can only be with one sponsor at a time."
             : pending ? "You already have an application waiting for review."
             : !sponsors.length ? "No sponsors are accepting applications right now." : "";
 
@@ -60,7 +61,9 @@ VIEWS.driver.sponsor = async () => {
       ${a.rejection_reason?`<br><span class="dim">Reason: ${esc(a.rejection_reason)}</span>`:""}
     </div>${badge(a.status)}</div>`).join("");
 
-  return `<div class="head"><div><h1>My sponsor</h1><p class="sub">Your sponsor awards your points and runs your catalog.</p></div></div>
+  return `<div class="head"><div><h1>My sponsors</h1><p class="sub">Your sponsor awards your points and runs your catalog.</p></div></div>
+  ${LIVE ? `<div class="panel"><h2>My memberships</h2>${(App.me.memberships || []).map(m =>
+    `<div class="li"><span>${esc(m.sponsor_name)} · ${n(m.current_points)} points</span>${badge(m.participation_status)}</div>`).join('') || '<p>No memberships yet.</p>'}</div>` : ''}
   <div class="grid g2">
     <div class="panel"><h2>${current ? esc(current.name) : "No sponsor yet"}</h2>
       ${current ? (current.email ? `<p class="dim">${esc(current.email)} · ${esc(current.phone||"")}<br>1 point = ${usd(current.rate)}</p>` : `<p class="dim">You're an active driver with this sponsor.</p>`)

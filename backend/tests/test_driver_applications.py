@@ -58,18 +58,17 @@ def test_unknown_sponsor(client):
 
 # ---- One Sponsor
 
-def test_driver_with_sponsor_cannot_apply_elsewhere(client, db):
+def test_driver_with_sponsor_can_apply_elsewhere(client, db):
     login(client, SEED_DRIVER)
-    r = apply(client, sponsor_id=900002)
-    assert r.status_code == 409
-    audit = one(db, "SELECT * FROM AUDIT_EVENT WHERE driver_id=900003 AND category='APPLICATION' AND success=0")
-    assert "already have a sponsor" in audit["reason_or_details"]
+    assert apply(client, sponsor_id=900002).status_code == 201
+    assert apply(client, sponsor_id=900001).status_code == 409
 
 
-def test_only_one_pending_application(client):
+def test_one_pending_application_per_sponsor(client):
     login(client, NEW_DRIVER)
     assert apply(client).status_code == 201
-    assert apply(client, sponsor_id=900002).status_code == 409
+    assert apply(client).status_code == 409
+    assert apply(client, sponsor_id=900002).status_code == 201
 
 
 # ---- Driver Application Status / Rejection Reason Statement / alerts
@@ -101,13 +100,13 @@ def test_approval_sets_sponsor_and_notifies(client, db):
     assert client.post(f"/api/sponsor/applications/{app_id}/decision",
                        json={"decision": "APPROVE"}).status_code == 200
 
-    d = one(db, "SELECT * FROM DRIVER WHERE driver_id=900004")
+    d = one(db, "SELECT * FROM DRIVER_SPONSOR WHERE driver_id=900004 AND sponsor_id=900001")
     assert d["sponsor_id"] == 900001 and d["participation_status"] == "ACTIVE"
     note = one(db, "SELECT * FROM NOTIFICATION WHERE user_id=900004 ORDER BY notification_id DESC")
     assert note["notification_type"] == "APPLICATION_APPROVED"
 
     login(client, NEW_DRIVER)
-    assert apply(client, sponsor_id=900002).status_code == 409   # now has a sponsor
+    assert apply(client, sponsor_id=900002).status_code == 201   # another sponsor is independent
 
 
 def test_reject_requires_reason(client):

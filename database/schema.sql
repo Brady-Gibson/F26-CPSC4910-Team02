@@ -1,6 +1,8 @@
 -- Team 02 - Good Driver Incentive Program
 -- Database Schema
--- MySQL / AWS RDS
+-- MySQL 8.0.16+ / AWS RDS
+-- Fresh installs: schema.sql already includes migrations 001 and 002.
+-- Existing installs: use numbered migrations instead of this file.
 
 USE Team02_DB;
 
@@ -77,6 +79,8 @@ CREATE TABLE SPONSOR_USER (
 
 CREATE TABLE DRIVER (
     driver_id INT PRIMARY KEY,
+    -- DEPRECATED: retained for the old backend until its RC#2 cutover.
+    -- DRIVER_SPONSOR is authoritative for the RC#2 application.
     sponsor_id INT NULL,
     current_points BIGINT NOT NULL DEFAULT 0,
     participation_status VARCHAR(20) NOT NULL,
@@ -89,6 +93,21 @@ CREATE TABLE DRIVER (
     CONSTRAINT fk_driver_sponsor
         FOREIGN KEY (sponsor_id)
         REFERENCES SPONSOR_ORGANIZATION(sponsor_id)
+);
+
+
+-- Each membership owns its balance and program participation.
+CREATE TABLE DRIVER_SPONSOR (
+    driver_id INT NOT NULL,
+    sponsor_id INT NOT NULL,
+    current_points BIGINT NOT NULL DEFAULT 0,
+    participation_status VARCHAR(20) NOT NULL,
+    joined_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (driver_id, sponsor_id),
+    INDEX idx_membership_sponsor_status (sponsor_id, participation_status),
+    CONSTRAINT fk_membership_driver FOREIGN KEY (driver_id) REFERENCES DRIVER(driver_id),
+    CONSTRAINT fk_membership_sponsor FOREIGN KEY (sponsor_id) REFERENCES SPONSOR_ORGANIZATION(sponsor_id),
+    CONSTRAINT chk_membership_balance CHECK (current_points >= 0)
 );
 
 
@@ -105,6 +124,14 @@ CREATE TABLE DRIVER_APPLICATION (
     status VARCHAR(20) NOT NULL,
     decision_at DATETIME NULL,
     reason VARCHAR(500),
+    cdl_number VARCHAR(30) NULL,
+    cdl_state CHAR(2) NULL,
+    years_experience INT NULL,
+    applicant_notes VARCHAR(500) NULL,
+    pending_sponsor_id INT GENERATED ALWAYS AS
+        (CASE WHEN status = 'PENDING' THEN sponsor_id ELSE NULL END) STORED,
+    UNIQUE KEY uq_pending_application (driver_id, pending_sponsor_id),
+    INDEX idx_application_driver_status (driver_id, status),
 
     CONSTRAINT fk_application_driver
         FOREIGN KEY (driver_id)
@@ -134,6 +161,9 @@ CREATE TABLE POINT_TRANSACTION (
     reason VARCHAR(500) NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
+    CONSTRAINT fk_point_membership FOREIGN KEY (driver_id, sponsor_id)
+        REFERENCES DRIVER_SPONSOR(driver_id, sponsor_id),
+
     CONSTRAINT fk_point_driver
         FOREIGN KEY (driver_id)
         REFERENCES DRIVER(driver_id),
@@ -162,6 +192,9 @@ CREATE TABLE RECURRING_POINT_SCHEDULE (
     frequency VARCHAR(30) NOT NULL,
     next_run_at DATETIME,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+
+    CONSTRAINT fk_schedule_membership FOREIGN KEY (driver_id, sponsor_id)
+        REFERENCES DRIVER_SPONSOR(driver_id, sponsor_id),
 
     CONSTRAINT fk_schedule_driver
         FOREIGN KEY (driver_id)
@@ -262,6 +295,13 @@ CREATE TABLE SHOPPING_CART (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
         ON UPDATE CURRENT_TIMESTAMP,
 
+    active_sponsor_id INT GENERATED ALWAYS AS
+        (CASE WHEN status = 'ACTIVE' THEN sponsor_id ELSE NULL END) STORED,
+    UNIQUE KEY uq_active_cart (driver_id, active_sponsor_id),
+    UNIQUE KEY uq_cart_sponsor (cart_id, sponsor_id),
+    CONSTRAINT fk_cart_membership FOREIGN KEY (driver_id, sponsor_id)
+        REFERENCES DRIVER_SPONSOR(driver_id, sponsor_id),
+
     CONSTRAINT fk_cart_driver
         FOREIGN KEY (driver_id)
         REFERENCES DRIVER(driver_id),
@@ -285,9 +325,9 @@ CREATE TABLE CART_ITEM (
 
     PRIMARY KEY (cart_id, sponsor_id, product_id),
 
-    CONSTRAINT fk_cart_item_cart
-        FOREIGN KEY (cart_id)
-        REFERENCES SHOPPING_CART(cart_id),
+    CONSTRAINT fk_cart_item_cart_sponsor
+        FOREIGN KEY (cart_id, sponsor_id)
+        REFERENCES SHOPPING_CART(cart_id, sponsor_id),
 
     CONSTRAINT fk_cart_item_catalog
         FOREIGN KEY (sponsor_id, product_id)
@@ -309,6 +349,10 @@ CREATE TABLE CUSTOMER_ORDER (
     total_dollar_amount DECIMAL(12,2),
     placed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     cancelled_at DATETIME NULL,
+
+    UNIQUE KEY uq_order_sponsor (order_id, sponsor_id),
+    CONSTRAINT fk_order_membership FOREIGN KEY (driver_id, sponsor_id)
+        REFERENCES DRIVER_SPONSOR(driver_id, sponsor_id),
 
     CONSTRAINT fk_order_driver
         FOREIGN KEY (driver_id)
@@ -339,9 +383,9 @@ CREATE TABLE ORDER_ITEM (
 
     PRIMARY KEY (order_id, line_number),
 
-    CONSTRAINT fk_order_item_order
-        FOREIGN KEY (order_id)
-        REFERENCES CUSTOMER_ORDER(order_id),
+    CONSTRAINT fk_order_item_order_sponsor
+        FOREIGN KEY (order_id, sponsor_id)
+        REFERENCES CUSTOMER_ORDER(order_id, sponsor_id),
 
     CONSTRAINT fk_order_item_catalog
         FOREIGN KEY (sponsor_id, product_id)

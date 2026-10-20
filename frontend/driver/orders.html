@@ -15,6 +15,7 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script src="../assets/js/mock-data.js"></script>
 <script src="../assets/js/app.js"></script>
+<script src="../assets/js/driver-live.js"></script>
 <script>
 VIEWS.driver.orders = () => `<div class="head"><div><h1>Orders</h1><p class="sub">You can cancel an order until it ships. Points go back to your balance.</p></div></div>
   ${orderCards(DB.customer_order.filter(o=>o.driver_id===ME.driver),true)}${src("customer_order","order_item","point_transaction")}`;

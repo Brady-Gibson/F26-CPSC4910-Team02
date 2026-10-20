@@ -6,7 +6,8 @@
 -- Columns are NULL-able so existing rows (like the seed data) still load.
 -- The Flask route makes them required for every NEW application.
 --
--- Run once against Team02_DB after schema.sql.
+-- Historical upgrade: run once against a pre-001 Team02_DB.
+-- Current schema.sql already includes these fields. Do not run after it.
 
 USE Team02_DB;
 

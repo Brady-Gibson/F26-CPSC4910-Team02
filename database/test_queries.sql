@@ -8,7 +8,7 @@ USE Team02_DB;
 -- TEST USERS
 -- =====================================================
 
-SELECT *
+SELECT user_id, username, first_name, last_name, email, account_status
 FROM USER_ACCOUNT
 WHERE user_id >= 900000;
 
@@ -39,7 +39,7 @@ SELECT
     s.sponsor_name,
     d.current_points,
     d.participation_status
-FROM DRIVER d
+FROM DRIVER_SPONSOR d
 JOIN USER_ACCOUNT u
     ON d.driver_id = u.user_id
 LEFT JOIN SPONSOR_ORGANIZATION s
@@ -194,15 +194,33 @@ WHERE team_number = 2;
 -- DATABASE STRUCTURE CHECKS
 -- =====================================================
 
--- Should return 18 tables
+-- Should return 19 tables
 SELECT COUNT(*) AS total_tables
 FROM information_schema.TABLES
 WHERE TABLE_SCHEMA = 'Team02_DB'
   AND TABLE_TYPE = 'BASE TABLE';
 
 
--- Should return 30 foreign-key relationships
+-- Should return 36 foreign-key relationships
 SELECT COUNT(*) AS total_foreign_keys
 FROM information_schema.TABLE_CONSTRAINTS
 WHERE TABLE_SCHEMA = 'Team02_DB'
   AND CONSTRAINT_TYPE = 'FOREIGN KEY';
+
+-- RC#2: each row is a separate balance; never SUM these for checkout.
+SELECT ds.driver_id, ds.sponsor_id, s.sponsor_name, ds.current_points,
+       ds.participation_status, ds.joined_at
+FROM DRIVER_SPONSOR ds
+JOIN SPONSOR_ORGANIZATION s ON s.sponsor_id = ds.sponsor_id
+WHERE ds.driver_id = 900003;
+
+-- Sponsor-facing roster: use the authenticated sponsor ID as the parameter.
+SELECT ds.driver_id, u.first_name, u.last_name, ds.current_points,
+       ds.participation_status
+FROM DRIVER_SPONSOR ds JOIN USER_ACCOUNT u ON u.user_id = ds.driver_id
+WHERE ds.sponsor_id = 900001;
+
+-- Sponsor-specific history.
+SELECT * FROM POINT_TRANSACTION
+WHERE driver_id = 900003 AND sponsor_id = 900001
+ORDER BY created_at, point_transaction_id;

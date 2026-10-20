@@ -41,7 +41,8 @@ VIEWS.admin.users = async () => {
   ${userRows.map(u=>`<tr data-r="${esc(u.role||"")}" data-t="${esc((u.first_name+" "+u.last_name+" "+u.username+" "+u.email).toLowerCase())}">
     <td><b>${esc(u.first_name)} ${esc(u.last_name)}</b><br><span class="dim">${esc(u.username)} · ${esc(u.email)}</span></td>
     <td>${ROLE_LABEL[u.role] || "No role"}</td><td>${esc(u.sponsor_name || "—")}</td><td>${badge(u.account_status)}</td><td>${fmtD(u.created_at)}</td>
-    <td class="num"><div class="row" style="justify-content:flex-end;flex-wrap:nowrap">${u.user_id===ME.admin ? `<span class="dim">You</span>` : `
+    <td class="num"><div class="row" style="justify-content:flex-end;flex-wrap:nowrap">
+      ${LIVE && u.role === 'driver' ? `<button class="btn ghost sm" data-memberships="${u.user_id}">Sponsors</button>` : ''}${u.user_id===ME.admin ? `<span class="dim">You</span>` : `
       <button class="btn ghost sm" data-reset="${u.user_id}">Reset password</button>
       ${u.account_status==="ACTIVE" ? `<button class="btn danger sm" data-st="${u.user_id}" data-to="LOCKED">Lock</button><button class="btn danger sm" data-st="${u.user_id}" data-to="INACTIVE">Deactivate</button>`
         : u.account_status==="LOCKED" ? `<button class="btn ghost sm" data-st="${u.user_id}" data-to="ACTIVE">Unlock</button><button class="btn danger sm" data-st="${u.user_id}" data-to="INACTIVE">Deactivate</button>`
@@ -147,6 +148,16 @@ function mockCreate(b){
 }
 
 bind.admin.users = () => {
+  document.querySelectorAll('[data-memberships]').forEach(b => b.onclick = () => {
+    const u = userRows.find(u => u.user_id === +b.dataset.memberships);
+    formDialog(`<h2>Sponsors for ${esc(u.first_name)} ${esc(u.last_name)}</h2>
+      ${(u.memberships || []).map(m => `<p>${esc(m.sponsor_name)} · ${esc(m.participation_status)} · ${n(m.current_points)} points</p>`).join('') || '<p>No memberships yet.</p>'}
+      <label class="field">Add sponsor<select id="assignSponsor">${sponsorList.filter(s => s.status === 'ACTIVE').map(s =>
+        `<option value="${s.sponsor_id}">${esc(s.sponsor_name)}</option>`).join('')}</select></label>${dlgButtons('Assign sponsor')}`, async () => {
+      await App.api(`/api/admin/drivers/${u.user_id}/sponsors`, {method:'POST', body:{sponsor_id:+$('#assignSponsor').value}});
+      toast('Sponsor assigned');
+    });
+  });
   const find = id => userRows.find(u=>u.user_id===id);
   const f=()=>{const r=$("#rf").value,q=$("#uq").value.toLowerCase(); document.querySelectorAll("[data-r]").forEach(t=>t.hidden=!((!r||t.dataset.r===r)&&t.dataset.t.includes(q)));};
   $("#rf").onchange=f; $("#uq").oninput=f;

@@ -36,7 +36,7 @@ def test_adjust_points(client, db):
     login(client)
     r = client.post(f"/api/sponsor/drivers/{DRIVER}/points", json={"delta": 250, "reason": "Clean inspection"})
     assert r.status_code == 200 and r.get_json()["balance_after"] == 750
-    assert one(db, "SELECT current_points FROM DRIVER WHERE driver_id=%s", DRIVER)["current_points"] == 750
+    assert one(db, "SELECT current_points FROM DRIVER_SPONSOR WHERE driver_id=%s AND sponsor_id=900001", DRIVER)["current_points"] == 750
 
 
 def test_adjust_points_rejects_bad_input(client):
@@ -50,14 +50,14 @@ def test_other_sponsor_cannot_touch_my_driver(client, db):
     login(client, "secondsponsor")
     assert client.post(f"/api/sponsor/drivers/{DRIVER}/points", json={"delta": 5, "reason": "x"}).status_code == 404
     assert client.post(f"/api/sponsor/drivers/{DRIVER}/drop").status_code == 404
-    assert one(db, "SELECT current_points FROM DRIVER WHERE driver_id=%s", DRIVER)["current_points"] == 500
+    assert one(db, "SELECT current_points FROM DRIVER_SPONSOR WHERE driver_id=%s AND sponsor_id=900001", DRIVER)["current_points"] == 500
 
 
 def test_drop_forfeits_points_and_pauses_schedules(client, db):
     login(client)
     r = client.post(f"/api/sponsor/drivers/{DRIVER}/drop")
     assert r.status_code == 200 and r.get_json()["forfeited"] == 500
-    d = one(db, "SELECT current_points, participation_status FROM DRIVER WHERE driver_id=%s", DRIVER)
+    d = one(db, "SELECT current_points, participation_status FROM DRIVER_SPONSOR WHERE driver_id=%s AND sponsor_id=900001", DRIVER)
     assert d == {"current_points": 0, "participation_status": "DROPPED"}
     assert one(db, "SELECT COUNT(*) AS n FROM RECURRING_POINT_SCHEDULE WHERE driver_id=%s AND is_active", DRIVER)["n"] == 0
     assert one(db, "SELECT 1 AS ok FROM NOTIFICATION WHERE user_id=%s AND notification_type='DROPPED'", DRIVER)
@@ -123,7 +123,7 @@ def test_cancel_order_refunds(client, db):
 
     assert client.post("/api/sponsor/orders/900001/cancel").status_code == 200
     assert one(db, "SELECT status FROM CUSTOMER_ORDER WHERE order_id=900001")["status"] == "CANCELLED"
-    assert one(db, "SELECT current_points FROM DRIVER WHERE driver_id=%s", DRIVER)["current_points"] == 1000
+    assert one(db, "SELECT current_points FROM DRIVER_SPONSOR WHERE driver_id=%s AND sponsor_id=900001", DRIVER)["current_points"] == 1000
     assert client.post("/api/sponsor/orders/900001/cancel").status_code == 409
 
 

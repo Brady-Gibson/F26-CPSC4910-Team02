@@ -69,9 +69,9 @@ def _my_driver(cur, driver_id, lock=False):
     cur.execute(
         """SELECT d.driver_id, d.sponsor_id, d.participation_status, d.current_points, u.username,
                   u.first_name, u.last_name
-             FROM DRIVER d JOIN USER_ACCOUNT u ON u.user_id = d.driver_id
-            WHERE d.driver_id = %s""" + (" FOR UPDATE" if lock else ""),
-        (driver_id,))
+             FROM DRIVER_SPONSOR d JOIN USER_ACCOUNT u ON u.user_id = d.driver_id
+            WHERE d.driver_id = %s AND d.sponsor_id = %s""" + (" FOR UPDATE" if lock else ""),
+        (driver_id, g.user["sponsor_id"]))
     row = cur.fetchone()
     return row if row and row["sponsor_id"] == g.user["sponsor_id"] else None
 
@@ -108,6 +108,13 @@ def decide(application_id):
 
     my_sponsor_id, me = g.user["sponsor_id"], g.user["user_id"]
     with transaction() as cur:
+        cur.execute("SELECT driver_id FROM DRIVER_APPLICATION WHERE application_id = %s AND sponsor_id = %s",
+                    (application_id, my_sponsor_id))
+        target = cur.fetchone()
+        if target is None:
+            return jsonify(error="Application not found."), 404
+        cur.execute("SELECT driver_id FROM DRIVER WHERE driver_id = %s FOR UPDATE", (target["driver_id"],))
+        cur.fetchone()
         cur.execute(
             """SELECT a.driver_id, a.sponsor_id, a.status, s.sponsor_name, u.username
                  FROM DRIVER_APPLICATION a
@@ -124,14 +131,9 @@ def decide(application_id):
 
         driver_id = app["driver_id"]
         if decision == "APPROVE":
-            cur.execute("SELECT sponsor_id, participation_status FROM DRIVER WHERE driver_id = %s FOR UPDATE",
-                        (driver_id,))
-            d = cur.fetchone()
-            if d["sponsor_id"] not in (None, my_sponsor_id) and d["participation_status"] == "ACTIVE":
-                return jsonify(error="This driver already joined another sponsor."), 409
-            cur.execute("""UPDATE DRIVER SET sponsor_id = %s, participation_status = 'ACTIVE',
-                                  joined_at = CURRENT_TIMESTAMP WHERE driver_id = %s""",
-                        (my_sponsor_id, driver_id))
+            cur.execute("""INSERT INTO DRIVER_SPONSOR (driver_id, sponsor_id, participation_status)
+                VALUES (%s, %s, 'ACTIVE') ON DUPLICATE KEY UPDATE participation_status = 'ACTIVE'""",
+                        (driver_id, my_sponsor_id))
             new_status = "APPROVED"
             message = f"Your application to {app['sponsor_name']} was approved. You can start earning points now."
         else:
@@ -147,7 +149,7 @@ def decide(application_id):
         log_audit(cur, "APPLICATION", True, actor_user_id=me, sponsor_id=my_sponsor_id, driver_id=driver_id,
                   subject_username=app["username"], entity_type="DRIVER_APPLICATION",
                   entity_id=application_id,
-                  details=f"Application {new_status.lower()}" + (f": {reason}" if reason else ""))
+                  details=(f"Application {new_status.lower()}" + (f": {reason}" if reason else ""))[:500])
 
     return jsonify(ok=True, application_id=application_id, status=new_status)
 
@@ -163,7 +165,7 @@ def drivers():
     rows = query(
         """SELECT d.driver_id, u.first_name, u.last_name, u.username, u.account_status,
                   d.participation_status, d.joined_at, d.current_points
-             FROM DRIVER d JOIN USER_ACCOUNT u ON u.user_id = d.driver_id
+             FROM DRIVER_SPONSOR d JOIN USER_ACCOUNT u ON u.user_id = d.driver_id
             WHERE d.sponsor_id = %s
             ORDER BY (d.participation_status = 'ACTIVE') DESC, u.last_name, u.first_name""",
         (sid,))
@@ -177,7 +179,7 @@ def adjust_points(driver_id):
     me, sid = g.user["user_id"], g.user["sponsor_id"]
     try:
         with transaction() as cur:
-            d = _my_driver(cur, driver_id)
+            d = _my_driver(cur, driver_id, lock=True)
             if d is None:
                 return jsonify(error="Driver not found."), 404
             if d["participation_status"] != "ACTIVE":
@@ -202,7 +204,7 @@ def drop_driver(driver_id):
             forfeited = int(d["current_points"])
             if forfeited:
                 change_points(cur, driver_id, sid, -forfeited, "Points forfeited on program drop", performed_by=me)
-            cur.execute("UPDATE DRIVER SET participation_status = 'DROPPED' WHERE driver_id = %s", (driver_id,))
+            cur.execute("UPDATE DRIVER_SPONSOR SET participation_status = 'DROPPED' WHERE driver_id = %s AND sponsor_id = %s", (driver_id, sid))
             cur.execute("UPDATE RECURRING_POINT_SCHEDULE SET is_active = FALSE WHERE driver_id = %s AND sponsor_id = %s",
                         (driver_id, sid))
             cur.execute("SELECT drop_alert_enabled FROM ALERT_PREFERENCE WHERE user_id = %s", (driver_id,))
@@ -232,7 +234,7 @@ def schedules():
         (sid,))
     active = query(
         """SELECT d.driver_id, u.first_name, u.last_name
-             FROM DRIVER d JOIN USER_ACCOUNT u ON u.user_id = d.driver_id
+             FROM DRIVER_SPONSOR d JOIN USER_ACCOUNT u ON u.user_id = d.driver_id
             WHERE d.sponsor_id = %s AND d.participation_status = 'ACTIVE'
             ORDER BY u.last_name, u.first_name""",
         (sid,))
@@ -261,7 +263,7 @@ def create_schedule():
         return jsonify(error="Pick a driver."), 400
 
     with transaction() as cur:
-        d = _my_driver(cur, driver_id)
+        d = _my_driver(cur, driver_id, lock=True)
         if d is None or d["participation_status"] != "ACTIVE":
             return jsonify(error="Pick one of your active drivers."), 400
         cur.execute(
@@ -287,7 +289,7 @@ def set_schedule_active(schedule_id):
         cur.execute(
             """SELECT r.driver_id, r.frequency, d.participation_status, u.username
                  FROM RECURRING_POINT_SCHEDULE r
-                 JOIN DRIVER d ON d.driver_id = r.driver_id
+                 JOIN DRIVER_SPONSOR d ON d.driver_id = r.driver_id AND d.sponsor_id = r.sponsor_id
                  JOIN USER_ACCOUNT u ON u.user_id = r.driver_id
                 WHERE r.schedule_id = %s AND r.sponsor_id = %s FOR UPDATE""",
             (schedule_id, sid))
@@ -408,7 +410,7 @@ def cancel_order(order_id):
                         (order_id,))
             if o["total_points"]:
                 change_points(cur, o["driver_id"], sid, int(o["total_points"]),
-                              f"Refund: order #{order_id} cancelled", performed_by=me)
+                              f"Refund: order #{order_id} cancelled", performed_by=me, allow_inactive=True)
             log_audit(cur, "ORDER", True, actor_user_id=me, sponsor_id=sid, driver_id=o["driver_id"],
                       subject_username=o["username"], entity_type="CUSTOMER_ORDER", entity_id=order_id,
                       details=f"Order cancelled by sponsor; {int(o['total_points']):,} points refunded")

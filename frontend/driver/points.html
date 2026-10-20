@@ -15,6 +15,7 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script src="../assets/js/mock-data.js"></script>
 <script src="../assets/js/app.js"></script>
+<script src="../assets/js/driver-live.js"></script>
 <script>
 VIEWS.driver.points = () => `<div class="head"><div><h1>Point history</h1><p class="sub">Every change to your balance and why it happened.</p></div></div>
   <div class="panel flush">${txTable(DB.point_transaction.filter(t=>t.driver_id===ME.driver).sort(byNewest))}</div>${src("point_transaction")}`;

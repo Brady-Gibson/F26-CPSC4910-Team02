@@ -40,21 +40,42 @@ def load_user(user_id):
                   CASE WHEN a.admin_id IS NOT NULL THEN 'admin'
                        WHEN su.sponsor_user_id IS NOT NULL THEN 'sponsor'
                        WHEN d.driver_id IS NOT NULL THEN 'driver' END AS role,
-                  COALESCE(su.sponsor_id, d.sponsor_id) AS sponsor_id,
+                  su.sponsor_id AS sponsor_id,
                   s.sponsor_name
              FROM USER_ACCOUNT u
              LEFT JOIN ADMIN a ON a.admin_id = u.user_id
              LEFT JOIN SPONSOR_USER su ON su.sponsor_user_id = u.user_id
              LEFT JOIN DRIVER d ON d.driver_id = u.user_id
-             LEFT JOIN SPONSOR_ORGANIZATION s ON s.sponsor_id = COALESCE(su.sponsor_id, d.sponsor_id)
+             LEFT JOIN SPONSOR_ORGANIZATION s ON s.sponsor_id = su.sponsor_id
             WHERE u.user_id = %s""",
         (user_id,), one=True)
     return u
 
 
+def driver_context(u):
+    if u["role"] != "driver":
+        return
+    memberships = query("""SELECT m.*, s.sponsor_name, s.status AS sponsor_status
+        FROM DRIVER_SPONSOR m JOIN SPONSOR_ORGANIZATION s USING (sponsor_id)
+        WHERE m.driver_id = %s ORDER BY m.sponsor_id""", (u["user_id"],))
+    active = [m for m in memberships if m["participation_status"] == "ACTIVE" and m["sponsor_status"] == "ACTIVE"]
+    key = "selected_sponsor_" + str(u["user_id"])
+    selected = next((m for m in active if m["sponsor_id"] == session.get(key)), None)
+    # A revoked selection cannot silently redirect a write to another sponsor.
+    if selected is None and (key not in session or request.method in READ_ONLY_METHODS):
+        selected = active[0] if active else None
+    u["sponsor_id"] = selected["sponsor_id"] if selected else None
+    u["sponsor_name"] = selected["sponsor_name"] if selected else None
+    session[key] = u["sponsor_id"]
+    u["memberships"] = memberships
+
+
 def public_user(u, viewed_by=None):
+    driver_context(u)
     out = {k: u[k] for k in ("user_id", "username", "first_name", "last_name", "email",
                              "role", "sponsor_id", "sponsor_name")}
+    if u["role"] == "driver":
+        out["memberships"] = u["memberships"]
     if viewed_by:
         out["viewed_by"] = {k: viewed_by[k] for k in ("user_id", "first_name", "last_name")}
     return out
@@ -80,6 +101,7 @@ def current_user():
             session.pop("view_as", None)
         else:
             g.viewed_by, u = u, target
+    driver_context(u)
     g.user = u
     return u
 

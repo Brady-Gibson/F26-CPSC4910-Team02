@@ -3,7 +3,7 @@
     with transaction() as cur:
         change_points(cur, driver_id, sponsor_id, -500, "Redeemed: order #42", performed_by=user_id)
 
-It locks the driver row, updates DRIVER.current_points, inserts POINT_TRANSACTION, logs AUDIT_EVENT,
+It locks the membership row, updates DRIVER_SPONSOR.current_points, inserts POINT_TRANSACTION, logs AUDIT_EVENT,
 and notifies the driver if their alert preference allows. Raises PointsError on bad input, which the
 caller turns into a 400. Because it runs on the caller's cursor, everything rolls back together.
 """
@@ -14,7 +14,7 @@ class PointsError(ValueError):
     pass
 
 
-def change_points(cur, driver_id, sponsor_id, delta, reason, performed_by):
+def change_points(cur, driver_id, sponsor_id, delta, reason, performed_by, *, allow_inactive=False):
     if not isinstance(delta, int) or isinstance(delta, bool) or delta == 0:
         raise PointsError("Points must be a whole number other than zero.")
     reason = (reason or "").strip()
@@ -24,11 +24,12 @@ def change_points(cur, driver_id, sponsor_id, delta, reason, performed_by):
         raise PointsError("Reason must be 500 characters or fewer.")
 
     cur.execute(
-        """SELECT d.current_points, d.sponsor_id, u.username
-             FROM DRIVER d JOIN USER_ACCOUNT u ON u.user_id = d.driver_id
-            WHERE d.driver_id = %s
+        """SELECT d.current_points, d.sponsor_id, d.participation_status, u.username, s.sponsor_name
+             FROM DRIVER_SPONSOR d JOIN USER_ACCOUNT u ON u.user_id = d.driver_id
+             JOIN SPONSOR_ORGANIZATION s ON s.sponsor_id = d.sponsor_id
+            WHERE d.driver_id = %s AND d.sponsor_id = %s
               FOR UPDATE""",
-        (driver_id,),
+        (driver_id, sponsor_id),
     )
     row = cur.fetchone()
     if row is None:
@@ -36,11 +37,16 @@ def change_points(cur, driver_id, sponsor_id, delta, reason, performed_by):
     if row["sponsor_id"] != sponsor_id:
         raise PointsError("This driver isn't with your sponsor.")
 
+    if not allow_inactive and row["participation_status"] != "ACTIVE":
+        raise PointsError("This membership is not active.")
+
     balance = int(row["current_points"]) + delta
+    if balance > 9223372036854775807:
+        raise PointsError("Balance exceeds the supported maximum.")
     if balance < 0:
         raise PointsError(f"That would leave the driver at {balance:,} points. Balances can't go below zero.")
 
-    cur.execute("UPDATE DRIVER SET current_points = %s WHERE driver_id = %s", (balance, driver_id))
+    cur.execute("UPDATE DRIVER_SPONSOR SET current_points = %s WHERE driver_id = %s AND sponsor_id = %s", (balance, driver_id, sponsor_id))
     cur.execute(
         """INSERT INTO POINT_TRANSACTION
              (driver_id, sponsor_id, performed_by_user_id, points_delta, balance_after, reason)
@@ -58,6 +64,6 @@ def change_points(cur, driver_id, sponsor_id, delta, reason, performed_by):
     if pref is None or pref["point_change_enabled"]:
         verb = "added" if delta > 0 else "deducted"
         notify(cur, driver_id, "POINT_CHANGE",
-               f"{abs(delta):,} points were {verb}: {reason}. New balance: {balance:,}.")
+               f"{row['sponsor_name']}: {abs(delta):,} points were {verb}: {reason}. New balance: {balance:,}.")
 
     return {"point_transaction_id": transaction_id, "balance_after": balance}

@@ -19,7 +19,7 @@ const ME = {};
 const VIEWS = { driver:{}, sponsor:{}, admin:{} };
 const bind = { driver:{}, sponsor:{}, admin:{} };
 const HOME = { driver:"driver/dashboard", sponsor:"sponsor/drivers", admin:"admin/users" };
-const ROUTES = {"driver": [["dashboard", "Dashboard"], ["catalog", "Catalog"], ["cart", "Cart"], ["orders", "Orders"], ["points", "Point history"], ["sponsor", "My sponsor"], ["notifications", "Notifications"], ["profile", "Profile"]], "sponsor": [["drivers", "Drivers"], ["applications", "Applications"], ["schedules", "Recurring points"], ["catalog", "Catalog"], ["orders", "Orders"], ["reports", "Reports"], ["organization", "Organization"]], "admin": [["users", "Users"], ["sponsors", "Sponsors"], ["audit", "Audit log"], ["reports", "Sales reports"], ["about", "About"]]};
+const ROUTES = {"driver": [["dashboard", "Dashboard"], ["catalog", "Catalog"], ["cart", "Cart"], ["orders", "Orders"], ["points", "Point history"], ["sponsor", "My sponsors"], ["notifications", "Notifications"], ["profile", "Profile"]], "sponsor": [["drivers", "Drivers"], ["applications", "Applications"], ["schedules", "Recurring points"], ["catalog", "Catalog"], ["orders", "Orders"], ["reports", "Reports"], ["organization", "Organization"]], "admin": [["users", "Users"], ["sponsors", "Sponsors"], ["audit", "Audit log"], ["reports", "Sales reports"], ["about", "About"]]};
 
 const store = {
   get(k){ try { return JSON.parse(sessionStorage.getItem(k)); } catch { return null; } },
@@ -179,13 +179,15 @@ const App = {
     if (!s || (!LIVE && !user(s.user_id))) { location.replace(ROOT + "login.html?next=" + encodeURIComponent(r + "/" + page)); return; }
     if (s.role !== r) { location.replace(ROOT + HOME[s.role] + ".html"); return; }
     role = r; ME[r] = s.user_id; App.page = page;
+    if (LIVE && r === "driver") installLiveDriverViews();
     document.title = `${ROUTES[r].find(x=>x[0]===page)[1]} · TigerTruck`;
     App.render();
   },
 
   async render(){
-    renderRail();
     try {
+      if (LIVE) App.me = (await App.api("/api/me")).user;
+      renderRail();
       $("#main").innerHTML = await VIEWS[role][App.page]();
       bind[role]?.[App.page]?.();
     } catch (e) {
@@ -326,6 +328,12 @@ function renderRail(){
     <div class="who"><b>${esc(u.first_name)} ${esc(u.last_name)}</b>${esc(sub)}</div>
     ${App.me?.viewed_by ? `<div class="viewas" role="status"><b>Viewing as ${esc(u.first_name)} ${esc(u.last_name)}</b>Read only. Signed in as ${esc(App.me.viewed_by.first_name)} ${esc(App.me.viewed_by.last_name)}.
       <button class="btn sm" id="stopViewAs">Back to admin</button></div>` : ""}
+    ${LIVE && role === "driver" ? `<label class="field" style="margin:12px">Current sponsor
+      <select id="selectedSponsor" ${App.me.viewed_by ? 'disabled' : ''}>
+      ${!u.sponsor_id ? '<option value="">No active sponsor</option>' : ''}
+      ${(u.memberships || []).filter(m => m.participation_status === 'ACTIVE' && m.sponsor_status === 'ACTIVE').map(m =>
+        `<option value="${m.sponsor_id}" ${m.sponsor_id === u.sponsor_id ? 'selected' : ''}>${esc(m.sponsor_name)}</option>`).join('')}
+      </select></label>` : ''}
     <nav class="nav" aria-label="Main">${ROUTES[role].map(([k,l])=>{ let c; try { c=counts[role][k]?.(); } catch {}
       return `<a href="${ROOT}${role}/${k}.html" ${k===App.page?'aria-current="page"':""}>${l}${c?`<span class="count">${c}</span>`:""}</a>`; }).join("")}</nav>
     <div class="rail-foot">
@@ -336,6 +344,13 @@ function renderRail(){
       <span>UI draft · data: <b>${esc(DATA_SOURCE)}</b></span>
       ${LIVE ? "" : `<button class="linkbtn" id="resetDemo">Reset demo data</button>`}
     </div>`;
+  if ($("#selectedSponsor")) $("#selectedSponsor").onchange = async e => {
+    e.target.disabled = true;
+    try {
+      await App.api('/api/driver/selected-sponsor', {method:'POST', body:{sponsor_id:+e.target.value}});
+      await App.render();
+    } catch (error) { toast(error.message); await App.render(); }
+  };
   $("#signOut").onclick = App.logout;
   if ($("#viewAs")) $("#viewAs").onclick = viewAsDialog;
   if ($("#stopViewAs")) $("#stopViewAs").onclick = stopViewAs;
