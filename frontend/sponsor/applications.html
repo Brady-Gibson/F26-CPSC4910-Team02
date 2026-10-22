@@ -17,10 +17,21 @@
 <script src="../assets/js/app.js"></script>
 <script>
 /* Driver Application Review (approve/reject is what sends the Sprint 3 application alerts)
-   LIVE: GET /api/sponsor/applications, POST /api/sponsor/applications/<id>/decision */
+   LIVE: GET /api/sponsor/applications?status=ALL|PENDING|APPROVED|REJECTED, POST /api/sponsor/applications/<id>/decision */
+
+/* Filter Applications: which statuses to show. Kept in a variable so it survives re-renders. */
+let appFilter = "ALL";
+const FILTERS = [["ALL","All"],["PENDING","Pending"],["APPROVED","Approved"],["REJECTED","Rejected"]];
 
 async function loadApplications(){
-  if (LIVE) return (await App.api("/api/sponsor/applications")).applications;
+  if (LIVE) return App.api(`/api/sponsor/applications?status=${appFilter}`);
+  const all = allSampleApplications();
+  const counts = { ALL: all.length, PENDING: 0, APPROVED: 0, REJECTED: 0 };
+  all.forEach(a => { if (a.status in counts) counts[a.status]++; });
+  return { applications: appFilter === "ALL" ? all : all.filter(a => a.status === appFilter), counts };
+}
+
+function allSampleApplications(){
   return DB.driver_application.filter(a=>a.sponsor_id===mySponsor())
     .sort((a,b)=>(a.status==="PENDING"?-1:1)-(b.status==="PENDING"?-1:1) || b.submitted_at.localeCompare(a.submitted_at))
     .map(a=>{ const u=user(a.driver_id); return { ...a, first_name:u.first_name, last_name:u.last_name, email:u.email,
@@ -28,7 +39,11 @@ async function loadApplications(){
 }
 
 VIEWS.sponsor.applications = async () => {
-  const apps = await loadApplications();
+  const { applications: apps, counts } = await loadApplications();
+  const filter = `<label class="field" style="max-width:220px">Show
+    <select id="appFilter" aria-label="Filter applications by status">${FILTERS.map(([v,l]) =>
+      `<option value="${v}" ${v===appFilter?"selected":""}>${l} (${counts[v] ?? 0})</option>`).join("")}</select></label>`;
+  const emptyMsg = appFilter === "ALL" ? "No applications yet." : `No ${appFilter.toLowerCase()} applications.`;
   const rows = apps.map(a=>`<tr>
     <td><b>${esc(a.first_name)} ${esc(a.last_name)}</b><br><span class="dim">${esc(a.email)}</span></td>
     <td>${a.cdl_number ? `${esc(a.cdl_number)} (${esc(a.cdl_state)})<br><span class="dim">${esc(a.years_experience)} yrs experience</span>` : `<span class="dim">Not provided</span>`}
@@ -38,10 +53,10 @@ VIEWS.sponsor.applications = async () => {
     <td class="num">${a.status==="PENDING" ? `<div class="row" style="justify-content:flex-end">
       <button class="btn go sm" data-ok="${a.application_id}">Approve</button>
       <button class="btn danger sm" data-no="${a.application_id}">Reject</button></div>` : ""}</td></tr>`).join("");
-  return `<div class="head"><div><h1>Applications</h1><p class="sub">Approving a driver makes you their sponsor and opens your catalog to them.</p></div></div>
+  return `<div class="head"><div><h1>Applications</h1><p class="sub">Approving a driver makes you their sponsor and opens your catalog to them.</p></div>${filter}</div>
   <div class="panel flush"><div class="tw"><table>
     <thead><tr><th>Driver</th><th>CDL</th><th>Submitted</th><th>Status</th><th></th></tr></thead>
-    <tbody>${rows || `<tr><td colspan="5" class="empty">No applications yet.</td></tr>`}</tbody>
+    <tbody>${rows || `<tr><td colspan="5" class="empty">${emptyMsg}</td></tr>`}</tbody>
   </table></div></div>${src("driver_application","driver","notification","audit_event")}`;
 };
 
@@ -75,6 +90,7 @@ function rejectDialog(id){
 }
 
 bind.sponsor.applications = () => {
+  $("#appFilter").onchange = e => { appFilter = e.target.value; App.render(); };
   document.querySelectorAll("[data-ok]").forEach(b => b.onclick = () => decide(+b.dataset.ok, "APPROVE", ""));
   document.querySelectorAll("[data-no]").forEach(b => b.onclick = () => rejectDialog(+b.dataset.no));
 };
