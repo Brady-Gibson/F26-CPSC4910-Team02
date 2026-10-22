@@ -166,3 +166,39 @@ def test_sponsor_list_excludes_current_sponsor(client):
     login(client, SEED_DRIVER)
     ids = [s["sponsor_id"] for s in client.get("/api/driver/sponsors").get_json()["sponsors"]]
     assert 900001 not in ids and 900002 in ids
+
+
+# ---- Filter Applications
+
+def test_filter_applications_by_status(client):
+    # Seed data already has one APPROVED application to sponsor 900001 (testdriver).
+    login(client, NEW_DRIVER)
+    app_id = apply(client).get_json()["application_id"]
+    login(client, SPONSOR_1_USER)
+
+    data = client.get("/api/sponsor/applications").get_json()
+    assert data["status"] == "ALL"
+    assert data["counts"] == {"ALL": 2, "PENDING": 1, "APPROVED": 1, "REJECTED": 0}
+    assert len(data["applications"]) == 2
+
+    pending = client.get("/api/sponsor/applications?status=pending").get_json()["applications"]
+    assert [a["application_id"] for a in pending] == [app_id]
+
+    client.post(f"/api/sponsor/applications/{app_id}/decision", json={"decision": "REJECT", "reason": "Not now"})
+    data = client.get("/api/sponsor/applications?status=REJECTED").get_json()
+    assert [a["application_id"] for a in data["applications"]] == [app_id]
+    assert data["counts"]["PENDING"] == 0 and data["counts"]["REJECTED"] == 1
+    assert client.get("/api/sponsor/applications?status=PENDING").get_json()["applications"] == []
+
+
+def test_filter_rejects_unknown_status(client):
+    login(client, SPONSOR_1_USER)
+    assert client.get("/api/sponsor/applications?status=BOGUS").status_code == 400
+
+
+def test_filter_counts_only_my_organization(client):
+    login(client, NEW_DRIVER)
+    apply(client)                                   # goes to sponsor 900001
+    login(client, SPONSOR_2_USER)
+    data = client.get("/api/sponsor/applications").get_json()
+    assert data["applications"] == [] and data["counts"]["ALL"] == 0

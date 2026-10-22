@@ -80,21 +80,42 @@ def _my_driver(cur, driver_id, lock=False):
     return row if row and row["sponsor_id"] == g.user["sponsor_id"] else None
 
 
+APPLICATION_STATUSES = ("PENDING", "APPROVED", "REJECTED")
+
+
 @bp.get("/applications")
 @require_role("sponsor")
 def applications():
+    """Applications sent to my organization. Filter Applications story: ?status=PENDING|APPROVED|REJECTED
+    (leave it off, or use ALL, for everything). Also returns how many are in each status."""
+    sid = g.user["sponsor_id"]
+    status = (request.args.get("status") or "ALL").strip().upper()
+    if status != "ALL" and status not in APPLICATION_STATUSES:
+        return jsonify(error="Status must be ALL, PENDING, APPROVED, or REJECTED."), 400
+
+    where, params = "a.sponsor_id = %s", [sid]
+    if status != "ALL":
+        where += " AND a.status = %s"
+        params.append(status)
     rows = query(
-        """SELECT a.application_id, a.driver_id, u.first_name, u.last_name, u.email,
+        f"""SELECT a.application_id, a.driver_id, u.first_name, u.last_name, u.email,
                   a.status, a.submitted_at, a.decision_at, a.reason,
                   a.cdl_number, a.cdl_state, a.years_experience, a.applicant_notes,
                   CONCAT(du.first_name, ' ', du.last_name) AS decided_by
              FROM DRIVER_APPLICATION a
              JOIN USER_ACCOUNT u ON u.user_id = a.driver_id
              LEFT JOIN USER_ACCOUNT du ON du.user_id = a.decided_by_user_id
-            WHERE a.sponsor_id = %s
+            WHERE {where}
             ORDER BY (a.status = 'PENDING') DESC, a.submitted_at DESC""",
-        (g.user["sponsor_id"],))
-    return jsonify(applications=rows)
+        tuple(params))
+
+    counts = {s: 0 for s in APPLICATION_STATUSES}
+    for r in query("SELECT status, COUNT(*) AS n FROM DRIVER_APPLICATION WHERE sponsor_id = %s GROUP BY status",
+                   (sid,)):
+        if r["status"] in counts:
+            counts[r["status"]] = r["n"]
+    counts["ALL"] = sum(counts.values())
+    return jsonify(applications=rows, status=status, counts=counts)
 
 
 @bp.post("/applications/<int:application_id>/decision")
