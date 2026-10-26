@@ -14,7 +14,7 @@ const $=id=>document.getElementById(id);
 (async()=>{
  try{
  const me=await fetch("/api/me",{credentials:"same-origin"});if(!me.ok){$("status").textContent="Sign in before setting up recovery questions.";return;}
- const user=(await me.json()).user;$("back").href=(user.role==="driver"?"driver":user.role==="sponsor"?"sponsor":"admin")+"/profile.html";
+ const user=(await me.json()).user;$("back").href=user.role==="driver"?"driver/profile.html":"login.html";
  const [opts,existing]=await Promise.all([fetch("/api/security-questions/options").then(r=>r.json()),fetch("/api/security-questions/me").then(r=>r.json())]);
  for(const id of ["q1","q2"]){for(const q of opts.questions){const o=document.createElement("option");o.value=q;o.textContent=q;$(id).append(o);}}
  if(existing.questions.length===2){$("q1").value=existing.questions[0].question;$("q2").value=existing.questions[1].question;$("status").textContent="Questions are configured. Saving will replace both answers.";}
