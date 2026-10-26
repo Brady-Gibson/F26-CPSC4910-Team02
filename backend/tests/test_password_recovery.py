@@ -23,7 +23,7 @@ def test_password_recovery_round_trip(client, db, monkeypatch):
     assert response.status_code == 200
     assert ses.return_value.send_email.called
     email = ses.return_value.send_email.call_args.kwargs["Message"]["Body"]["Text"]["Data"]
-    token = re.search(r"token=([^\\s]+)", email).group(1)
+    token = email.split("token=", 1)[1].splitlines()[0].strip()
     payload = {"token": token, "new_password": "NewPassword456!", "confirm_password": "NewPassword456!"}
     assert client.post("/api/password-reset/confirm", json=payload).status_code == 200
     assert client.post("/api/password-reset/confirm", json=payload).status_code == 400
