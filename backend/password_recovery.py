@@ -1,5 +1,7 @@
 """Self-service password recovery using AWS SES. No schema migration required."""
 import os
+import hmac
+import hashlib
 from urllib.parse import quote
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -13,6 +15,9 @@ from db import query, transaction
 bp = Blueprint("password_recovery", __name__, url_prefix="/api/password-reset")
 GENERIC = "If an active account uses that email, a reset link will be sent."
 EXPIRY_SECONDS = 1800
+
+def fingerprint(password_hash):
+    return hmac.new(current_app.config['SECRET_KEY'].encode(), password_hash.encode(), hashlib.sha256).hexdigest()
 
 def serializer():
     return URLSafeTimedSerializer(current_app.config["SECRET_KEY"], salt="tigertruck-password-reset-v1")
@@ -30,7 +35,7 @@ def request_reset():
         if not sender or not base or not base.startswith("https://"):
             current_app.logger.error("Password reset SES_FROM_EMAIL or HTTPS PUBLIC_BASE_URL not configured")
             return jsonify(error="Password recovery is temporarily unavailable."), 503
-        token = serializer().dumps([row["user_id"], row["password_hash"]])
+        token = serializer().dumps([row["user_id"], fingerprint(row["password_hash"])])
         link = base + "/reset-password.html?token=" + quote(token, safe="")
         try:
             boto3.client("ses", region_name=os.getenv("AWS_REGION", "us-east-1")).send_email(
@@ -63,7 +68,7 @@ def confirm_reset():
     with transaction() as cur:
         cur.execute("SELECT username, password_hash, account_status FROM USER_ACCOUNT WHERE user_id = %s FOR UPDATE", (user_id,))
         row = cur.fetchone()
-        if not row or row["account_status"] != "ACTIVE" or row["password_hash"] != old_hash:
+        if not row or row["account_status"] != "ACTIVE" or not hmac.compare_digest(fingerprint(row["password_hash"]), old_hash):
             return jsonify(error="This reset link has already been used or is no longer valid."), 400
         cur.execute("UPDATE USER_ACCOUNT SET password_hash = %s WHERE user_id = %s", (generate_password_hash(password), user_id))
         log_audit(cur, "ACCOUNT", True, subject_username=row["username"], entity_type="USER_ACCOUNT",
