@@ -64,3 +64,26 @@ def test_full_recovery_round_trip(client, db):
         "token": token, "new_password": "AnotherPassword789!", "confirm_password": "AnotherPassword789!"})
     assert reused.status_code == 400
     assert client.post("/api/login", json={"username": "testdriver", "password": "NewPassword456!"}).status_code == 200
+
+
+def test_changing_questions_invalidates_existing_recovery_token(client):
+    assert client.post("/api/login", json={"username": "testdriver", "password": "Password123!"}).status_code == 200
+    names = client.get("/api/security-questions/options").json["questions"]
+    def save(first, second):
+        return client.post("/api/security-questions/me", json={
+            "current_password": "Password123!",
+            "questions": [{"question": names[0], "answer": first},
+                          {"question": names[1], "answer": second}],
+        })
+    assert save("Apollo", "Clemson").status_code == 200
+    client.post("/api/logout")
+    verified = client.post("/api/security-questions/verify", json={
+        "username": "testdriver", "answers": ["apollo", "clemson"]})
+    assert verified.status_code == 200
+    token = verified.json["token"]
+    assert client.post("/api/login", json={"username": "testdriver", "password": "Password123!"}).status_code == 200
+    assert save("NewPet", "NewSchool").status_code == 200
+    client.post("/api/logout")
+    reset = client.post("/api/security-questions/reset", json={
+        "token": token, "new_password": "NewPassword456!", "confirm_password": "NewPassword456!"})
+    assert reset.status_code == 400
