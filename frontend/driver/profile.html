@@ -28,7 +28,7 @@ VIEWS.driver.profile = async () => {
   ${PROFILE_FIELDS.map(([k,l,t,max,req])=>`<label class="field">${l}<input type="${t}" data-f="${k}" maxlength="${max}" value="${esc(u[k])}"${req?" required":` placeholder="optional"`}></label>`).join("")}
   <p id="profileErr" role="alert" style="margin:0;color:var(--red)"></p>
   <button class="btn go" id="saveP">Save changes</button></div></form>
-  <div class="panel"><h2>Account</h2><p>Username <b>${esc(u.username)}</b></p><p>Status ${badge(u.account_status)}</p><button class="btn ghost" id="changePw">Change password</button>${src("user_account","audit_event")}</div></div>`;
+  <div class="panel"><h2>Account</h2><p>Username <b>${esc(u.username)}</b></p><p>Status ${badge(u.account_status)}</p><button class="btn ghost" id="changePw">Change password</button><p><a href="../security-questions.html">Set up security questions</a></p>${src("user_account","audit_event")}</div></div>`;
 };
 
 bind.driver.profile = () => {
