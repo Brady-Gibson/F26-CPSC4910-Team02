@@ -21,17 +21,17 @@
 
       <label class="field">
         First name
-        <input id="firstName" required>
+        <input id="firstName" type="text" required>
       </label>
 
       <label class="field">
         Last name
-        <input id="lastName" required>
+        <input id="lastName" type="text" required>
       </label>
 
       <label class="field">
         Username
-        <input id="username" required>
+        <input id="username" type="text" required>
       </label>
 
       <label class="field">
@@ -46,12 +46,14 @@
 
       <label class="field">
         Password
-        <input id="password" type="password" required>
+        <input id="password" type="password" autocomplete="new-password" aria-describedby="passwordRequirements" required>
+        <span id="passwordRequirements" class="dim" style="font-weight:400">Use at least 8 characters, including an uppercase letter, a lowercase letter, a number, and a symbol.</span>
       </label>
 
       <label class="field">
         Confirm password
-        <input id="confirmPassword" type="password" required>
+        <input id="confirmPassword" type="password" autocomplete="new-password" aria-describedby="passwordMatch" required>
+        <span id="passwordMatch" role="status" aria-live="polite" style="font-weight:400"></span>
       </label>
 
       <button class="btn go" type="submit" id="submit">
@@ -67,6 +69,19 @@
 </main>
 
 <script>
+const passwordInput = document.querySelector("#password");
+const confirmPasswordInput = document.querySelector("#confirmPassword");
+function updatePasswordMatch() {
+  const message = document.querySelector("#passwordMatch");
+  const hasConfirmation = confirmPasswordInput.value.length > 0;
+  const matches = passwordInput.value === confirmPasswordInput.value;
+  message.textContent = hasConfirmation ? (matches ? "Passwords match." : "Passwords do not match yet.") : "";
+  message.style.color = hasConfirmation && !matches ? "var(--red)" : "";
+}
+passwordInput.addEventListener("input", updatePasswordMatch);
+confirmPasswordInput.addEventListener("input", updatePasswordMatch);
+updatePasswordMatch();
+
 document.querySelector("#registerForm").onsubmit = async (event) => {
   event.preventDefault();
 
