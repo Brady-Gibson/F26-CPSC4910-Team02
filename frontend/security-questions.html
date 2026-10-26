@@ -1,0 +1,32 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Security questions · TigerTruck</title><link rel="stylesheet" href="assets/css/app.css">
+<link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;700;800;900&display=swap" rel="stylesheet"></head>
+<body class="auth"><aside class="auth-side"><div class="brand"><img class="shield" src="assets/img/logo.png" alt="Tiger Trucking logo"></div>
+<div class="sign auth-sign"><div class="sign-in"><div class="sign-label">Good Driver Incentive Program</div><h1>Protect your account.</h1><p>Set up recovery questions while signed in.</p></div></div></aside>
+<main class="auth-main"><div class="auth-card"><h2>Security questions</h2><p class="dim">Choose two different questions. You'll need both answers if you forget your password.</p>
+<p id="status" role="status"></p><form id="form" hidden>
+<label class="field">Question 1<select id="q1" required></select></label><label class="field">Answer 1<input id="a1" required minlength="3" maxlength="150" autocomplete="off"></label>
+<label class="field">Question 2<select id="q2" required></select></label><label class="field">Answer 2<input id="a2" required minlength="3" maxlength="150" autocomplete="off"></label>
+<label class="field">Current password (to confirm it's you)<input id="password" type="password" autocomplete="current-password" required></label>
+<button class="btn go">Save security questions</button></form><p><a id="back" href="login.html">Back</a></p></div></main>
+<script>
+const $=id=>document.getElementById(id);
+(async()=>{
+ try{
+ const me=await fetch("/api/me",{credentials:"same-origin"});if(!me.ok){$("status").textContent="Sign in before setting up recovery questions.";return;}
+ const user=(await me.json()).user;$("back").href=(user.role==="driver"?"driver":user.role==="sponsor"?"sponsor":"admin")+"/profile.html";
+ const [opts,existing]=await Promise.all([fetch("/api/security-questions/options").then(r=>r.json()),fetch("/api/security-questions/me").then(r=>r.json())]);
+ for(const id of ["q1","q2"]){for(const q of opts.questions){const o=document.createElement("option");o.value=q;o.textContent=q;$(id).append(o);}}
+ if(existing.questions.length===2){$("q1").value=existing.questions[0].question;$("q2").value=existing.questions[1].question;$("status").textContent="Questions are configured. Saving will replace both answers.";}
+ else{$("q2").selectedIndex=1;}
+ $("form").hidden=false;
+ }catch(err){$("status").textContent="Unable to load security questions.";}
+})();
+$("form").onsubmit=async e=>{e.preventDefault();$("status").textContent="";
+ if($("q1").value===$("q2").value){$("status").textContent="Choose two different questions.";return;}
+ try{const r=await fetch("/api/security-questions/me",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},
+ body:JSON.stringify({current_password:$("password").value,questions:[{question:$("q1").value,answer:$("a1").value},{question:$("q2").value,answer:$("a2").value}]})});
+ const data=await r.json();if(!r.ok)throw Error(data.error||"Unable to save.");
+ $("status").textContent="Security questions saved.";$("a1").value="";$("a2").value="";$("password").value="";
+ }catch(err){$("status").textContent=err.message;}};
+</script></body></html>
