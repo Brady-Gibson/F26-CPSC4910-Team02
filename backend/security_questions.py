@@ -2,7 +2,6 @@
 import hashlib
 import hmac
 import secrets
-from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, current_app, g, jsonify, request
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
@@ -22,7 +21,6 @@ QUESTIONS = (
     "What was the name of your favorite childhood teacher?",
     "What was the name of your first stuffed animal?",
 )
-GENERIC = "If this account has recovery questions configured, you can continue."
 DUMMY = generate_password_hash("dummy-answer-" + secrets.token_hex(8))
 
 
@@ -45,8 +43,9 @@ def _questions(user_id):
                     FROM USER_SECURITY_QUESTION WHERE user_id=%s ORDER BY question_number""", (user_id,))
 
 
-def _fingerprint(password_hash):
-    return hmac.new(current_app.secret_key.encode(), password_hash.encode(), hashlib.sha256).hexdigest()
+def _fingerprint(password_hash, answer_hashes=()):
+    material = password_hash + "|" + "|".join(answer_hashes)
+    return hmac.new(current_app.secret_key.encode(), material.encode(), hashlib.sha256).hexdigest()
 
 
 def _attempts(identifier):
@@ -139,7 +138,7 @@ def verify():
             log_audit(cur, "ACCOUNT", False, subject_username=audit_name,
                       details="Security question verification failed")
         return jsonify(error="Unable to verify these answers."), 403
-    token = _tokenizer().dumps({"uid": user["user_id"], "pw": _fingerprint(user["password_hash"])})
+    token = _tokenizer().dumps({"uid": user["user_id"], "pw": _fingerprint(user["password_hash"], [r["answer_hash"] for r in rows])})
     return jsonify(ok=True, token=token, expires_in=600)
 
 
@@ -166,7 +165,9 @@ def reset():
         cur.execute("""SELECT username, password_hash FROM USER_ACCOUNT
                        WHERE user_id=%s AND account_status='ACTIVE' FOR UPDATE""", (uid,))
         user = cur.fetchone()
-        if not user or not hmac.compare_digest(_fingerprint(user["password_hash"]), fingerprint):
+        question_rows = _questions(uid) if user else []
+        if not user or len(question_rows) != 2 or not hmac.compare_digest(
+                _fingerprint(user["password_hash"], [r["answer_hash"] for r in question_rows]), fingerprint):
             return jsonify(error="Recovery session expired or already used."), 400
         if check_password_hash(user["password_hash"], new):
             return jsonify(error="Choose a password different from your current one."), 400
