@@ -26,8 +26,26 @@ def serializer():
 def request_reset():
     data = request.get_json(silent=True) or {}
     email = str(data.get("email") or "").strip().lower()
-    if not email or len(email) > 100:
+    if not email or len(email) > 100 or "@" not in email:
         return jsonify(error="Enter a valid email address."), 400
+    # Database-backed throttling works across Beanstalk instances without extra services.
+    # Hash the email and remote address so raw recovery identifiers are not logged.
+    ip = request.remote_addr or "unknown"
+    key = hmac.new(current_app.config["SECRET_KEY"].encode(), email.encode(), hashlib.sha256).hexdigest()
+    ip_key = hmac.new(current_app.config["SECRET_KEY"].encode(), ip.encode(), hashlib.sha256).hexdigest()
+    with transaction() as cur:
+        cur.execute("""SELECT COUNT(*) AS n FROM AUDIT_EVENT
+            WHERE category = 'PASSWORD_RECOVERY' AND subject_username = %s
+              AND created_at > UTC_TIMESTAMP() - INTERVAL 1 HOUR""", (key,))
+        email_count = cur.fetchone()["n"]
+        cur.execute("""SELECT COUNT(*) AS n FROM AUDIT_EVENT
+            WHERE category = 'PASSWORD_RECOVERY' AND reason_or_details = %s
+              AND created_at > UTC_TIMESTAMP() - INTERVAL 1 HOUR""", (ip_key,))
+        ip_count = cur.fetchone()["n"]
+        if email_count >= 3 or ip_count >= 10:
+            return jsonify(ok=True, message=GENERIC)
+        cur.execute("""INSERT INTO AUDIT_EVENT (category, subject_username, success, reason_or_details)
+            VALUES ('PASSWORD_RECOVERY', %s, TRUE, %s)""", (key, ip_key))
     row = query("SELECT user_id, email, password_hash FROM USER_ACCOUNT WHERE LOWER(email) = %s AND account_status = 'ACTIVE'", (email,), one=True)
     if row:
         sender = os.getenv("SES_FROM_EMAIL")
