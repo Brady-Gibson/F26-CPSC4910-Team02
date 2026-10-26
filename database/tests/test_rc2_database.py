@@ -189,6 +189,7 @@ def test_preflight_stops_before_schema_changes(conn, conflict):
 def test_migrated_schema_matches_fresh_schema(conn):
     legacy(conn)
     migrate(conn)
+    run_sql(conn, ROOT / 'migrations/003_security_questions.sql')
     def contract():
         columns = execute(conn, "SELECT TABLE_NAME,COLUMN_NAME,COLUMN_TYPE,IS_NULLABLE,COLUMN_DEFAULT,EXTRA,GENERATION_EXPRESSION FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() ORDER BY TABLE_NAME,ORDINAL_POSITION")
         keys = execute(conn, "SELECT TABLE_NAME,CONSTRAINT_NAME,COLUMN_NAME,REFERENCED_TABLE_NAME,REFERENCED_COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA=DATABASE() ORDER BY TABLE_NAME,CONSTRAINT_NAME,ORDINAL_POSITION")
