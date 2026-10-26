@@ -66,6 +66,8 @@ CORS(application, resources={r"/api/*": {"origins": os.getenv("CORS_ORIGINS", "h
      supports_credentials=True)
 
 application.register_blueprint(auth.bp)
+from password_recovery import bp as password_recovery_bp
+application.register_blueprint(password_recovery_bp)
 application.register_blueprint(dev.bp)
 
 # Role routes: uncomment your two lines when you add your routes file.
