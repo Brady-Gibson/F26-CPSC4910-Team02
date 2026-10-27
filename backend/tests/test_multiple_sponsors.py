@@ -24,6 +24,13 @@ def test_switch_scopes_dashboard_and_history(client, db):
     assert client.get('/api/driver/dashboard').get_json()['driver']['current_points'] == 500
 
 
+def test_catalog_returns_selected_membership_points(client):
+    login(client, 'testdriver')
+    assert client.get('/api/driver/catalog').get_json()['current_points'] == 500
+    select(client, 900010)
+    assert client.get('/api/driver/catalog').get_json()['current_points'] == 200
+
+
 def test_approve_second_membership_preserves_first(client, db):
     login(client, 'testdriver')
     app_id = apply(client, sponsor_id=900002).get_json()['application_id']

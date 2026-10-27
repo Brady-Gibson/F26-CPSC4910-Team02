@@ -18,6 +18,7 @@ from flask.json.provider import DefaultJSONProvider
 from flask_cors import CORS
 
 import auth
+import security_questions
 from db import query
 from routes import dev
 
@@ -66,6 +67,7 @@ CORS(application, resources={r"/api/*": {"origins": os.getenv("CORS_ORIGINS", "h
      supports_credentials=True)
 
 application.register_blueprint(auth.bp)
+application.register_blueprint(security_questions.bp)
 application.register_blueprint(dev.bp)
 
 # Role routes: uncomment your two lines when you add your routes file.
@@ -73,8 +75,10 @@ from routes import driver, driver_commerce
 application.register_blueprint(driver.bp)
 from routes import sponsor
 application.register_blueprint(sponsor.bp)
-from routes import admin
+from routes import admin, admin_audit, bulk_import
 application.register_blueprint(admin.bp)
+application.register_blueprint(admin_audit.bp)
+application.register_blueprint(bulk_import.bp)
 
 
 @application.route("/")

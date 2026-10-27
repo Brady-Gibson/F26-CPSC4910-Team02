@@ -29,7 +29,10 @@ def driver_catalog():
     rows = query('''SELECT p.*, c.point_price FROM CATALOG_ITEM c
         JOIN PRODUCT p USING (product_id) WHERE c.sponsor_id = %s AND c.is_active = TRUE
         ORDER BY p.product_name''', (g.user['sponsor_id'],))
-    return jsonify(products=rows, sponsor_id=g.user['sponsor_id'])
+    member = query('SELECT current_points FROM DRIVER_SPONSOR WHERE driver_id = %s AND sponsor_id = %s',
+                   (g.user['user_id'], g.user['sponsor_id']), one=True)
+    return jsonify(products=rows, sponsor_id=g.user['sponsor_id'],
+                   current_points=member['current_points'] if member else 0)
 
 
 @bp.get('/points')

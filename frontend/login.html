@@ -10,7 +10,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/css/app.css">
 </head>
-<body class="auth" data-root="">
+<body class="auth login-page" data-root="">
 <aside class="auth-side">
   <div class="brand">
     <img class="shield" src="assets/img/logo.png" alt="Tiger Trucking logo">
@@ -38,7 +38,7 @@
         <span class="pw"><input type="password" id="pass" name="password" autocomplete="current-password" required>
         <button type="button" id="showPw" aria-label="Show password">Show</button></span>
       </label>
-      <div class="auth-row"><span></span><a href="#" id="forgot">Forgot password?</a></div>
+      <div class="auth-row"><span></span><a href="forgot-password.html" id="forgot">Forgot password?</a></div>
       <button class="btn go" type="submit" id="submit">Sign in</button>
       <p style="margin-top:16px">
         New driver?
@@ -88,7 +88,6 @@ $("#showPw").onclick = () => {
   $("#showPw").textContent = show ? "Hide" : "Show";
   $("#showPw").setAttribute("aria-label", show ? "Hide password" : "Show password");
 };
-$("#forgot").onclick = e => { e.preventDefault(); toast("Password reset isn't set up yet. Ask your sponsor or an admin."); };
 
 $("#loginForm").onsubmit = async e => {
   e.preventDefault();

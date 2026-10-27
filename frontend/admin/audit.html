@@ -8,6 +8,13 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../assets/css/app.css">
+<style>
+#auditFilters input[type=date]{border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:8px 10px;min-width:0}
+:root[data-theme=dark] #auditFilters input[type=date]{color-scheme:dark}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]) #auditFilters input[type=date]{color-scheme:dark}}
+#auditError{color:var(--red)}
+#auditError:empty{display:none}
+</style>
 </head>
 <body data-root="../">
 <div class="shell"><aside class="rail" id="rail"></aside><main id="main" tabindex="-1"><div class="loading">Loading…</div></main></div>
@@ -15,19 +22,6 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script src="../assets/js/mock-data.js"></script>
 <script src="../assets/js/app.js"></script>
-<script>
-VIEWS.admin.audit = () => { const cats=[...new Set(DB.audit_event.map(a=>a.category))].sort();
-  return `<div class="head"><div><h1>Audit log</h1><p class="sub">Logins, password changes, applications, and point changes.</p></div>
-  <div class="row"><select id="ac" aria-label="Category"><option value="">All categories</option>${cats.map(c=>`<option>${c}</option>`).join("")}</select>
-  <select id="as" aria-label="Result"><option value="">Any result</option><option value="1">Succeeded</option><option value="0">Failed</option></select></div></div>
-  <div class="panel flush"><div class="tw"><table><thead><tr><th>When</th><th>Category</th><th>User</th><th>Sponsor</th><th>Details</th><th>Result</th></tr></thead><tbody>
-  ${[...DB.audit_event].sort(byNewest).map(a=>`<tr data-c="${a.category}" data-s="${a.success?1:0}"><td class="when">${fmtDT(a.created_at)}</td><td>${esc(a.category.replace("_"," ").toLowerCase())}</td><td>${esc(a.subject_username||"—")}<br><span class="dim">by ${esc(uname(a.actor_user_id))}</span></td>
-    <td>${a.sponsor_id?esc(sponsor(a.sponsor_id).sponsor_name):"—"}</td><td>${esc(a.reason_or_details)}</td><td>${a.success?badge("ACTIVE").replace("active","ok"):badge("FAIL").replace("fail","failed")}</td></tr>`).join("")}
-  </tbody></table></div></div>${src("audit_event")}`; };
-
-bind.admin.audit = () => { const f=()=>{const c=$("#ac").value,s=$("#as").value; document.querySelectorAll("[data-c]").forEach(r=>r.hidden=!((!c||r.dataset.c===c)&&(!s||r.dataset.s===s)));}; $("#ac").onchange=f; $("#as").onchange=f; };
-
-App.start("admin", "audit");
-</script>
+<script src="../assets/js/admin-audit.js"></script>
 </body>
 </html>

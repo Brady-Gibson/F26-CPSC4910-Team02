@@ -439,3 +439,17 @@ CREATE TABLE ABOUT_RELEASE (
     product_name VARCHAR(100) NOT NULL,
     product_description TEXT
 );
+
+
+-- Optional security-question recovery (existing deployments: see migration 003).
+CREATE TABLE USER_SECURITY_QUESTION (
+    security_question_id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    question_number TINYINT NOT NULL,
+    question_text VARCHAR(255) NOT NULL,
+    answer_hash VARCHAR(255) NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_user_question (user_id, question_number),
+    CONSTRAINT fk_security_question_user FOREIGN KEY (user_id)
+        REFERENCES USER_ACCOUNT(user_id) ON DELETE CASCADE
+);
