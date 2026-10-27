@@ -1,0 +1,3 @@
+O|RC1 Example Freight
+D|RC1 Example Freight|Joe|Driver|rc1.joe@example.com|100|Welcome bonus
+S|RC1 Example Freight|Jill|Sponsor|rc1.jill@example.com
