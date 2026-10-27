@@ -104,6 +104,11 @@ textarea{width:100%;min-height:70px}
 .item .nm{font-weight:800;line-height:1.25}
 .item .pts{font-size:22px;font-weight:900}
 .item .bd .btn{margin-top:auto}
+.item-img{aspect-ratio:4/3;width:100%;object-fit:contain;background:#fff;display:block}
+.item-open{all:unset;cursor:pointer;display:block}
+.item-open:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.item-open.nm:hover{text-decoration:underline}
+.item-desc{margin:0;white-space:pre-line;max-height:40vh;overflow:auto}
 
 .list{display:flex;flex-direction:column}
 .li{display:flex;gap:12px;justify-content:space-between;align-items:flex-start;padding:12px 18px;border-top:1px solid var(--line)}
