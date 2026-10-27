@@ -16,7 +16,8 @@
 <script src="../assets/js/mock-data.js"></script>
 <script src="../assets/js/app.js"></script>
 <script>
-/* LIVE: GET /api/sponsor/drivers, POST /api/sponsor/drivers/<id>/points (in adjustDialog), POST /api/sponsor/drivers/<id>/drop */
+/* LIVE: GET /api/sponsor/drivers, POST /api/sponsor/drivers/<id>/points (in adjustDialog), POST /api/sponsor/drivers/<id>/drop
+         Driver detail: GET /api/sponsor/drivers/<id>, PATCH /api/sponsor/drivers/<id>; Add driver: POST /api/sponsor/drivers */
 
 function mockDrivers(){
   const s = sponsor(mySponsor());
@@ -26,15 +27,19 @@ function mockDrivers(){
 
 let driverRows = [];
 
+let viewingId = null;   // set when a sponsor opens one driver's detail view
+
 VIEWS.sponsor.drivers = async () => {
+  if (viewingId) return driverDetailView(viewingId);
   const { sponsor: s, drivers } = LIVE ? await App.api("/api/sponsor/drivers") : mockDrivers();
   driverRows = drivers;
   return `<div class="head"><div><h1>Drivers</h1><p class="sub">${drivers.filter(d=>d.participation_status==="ACTIVE").length} active drivers at ${esc(s.sponsor_name)}. 1 point = ${usd(s.point_dollar_rate)}.</p></div>
-    <input type="search" id="dq" placeholder="Search drivers" aria-label="Search drivers"></div>
+    <div class="row"><input type="search" id="dq" placeholder="Search drivers" aria-label="Search drivers">
+    <button class="btn go" id="addDriver">Add driver</button></div></div>
   <div class="panel flush"><div class="tw"><table><thead><tr><th>Driver</th><th>Status</th><th>Joined</th><th class="num">Points</th><th class="num">Value</th><th></th></tr></thead><tbody>
   ${drivers.map(d=>`<tr data-row="${esc((d.first_name+" "+d.last_name+" "+d.username).toLowerCase())}"><td><b>${esc(d.first_name)} ${esc(d.last_name)}</b><br><span class="dim">${esc(d.username)}</span></td>
     <td>${badge(d.participation_status)}${d.account_status!=="ACTIVE"?" "+badge(d.account_status):""}</td><td>${fmtD(d.joined_at)}</td><td class="num"><b>${n(d.current_points)}</b></td><td class="num">${usd(d.current_points*s.point_dollar_rate)}</td>
-    <td class="num"><div class="row" style="justify-content:flex-end">${d.participation_status==="ACTIVE"?`<button class="btn go sm" data-adj="${d.driver_id}">Adjust points</button><button class="btn danger sm" data-drop="${d.driver_id}">Drop</button>`:""}</div></td></tr>`).join("")
+    <td class="num"><div class="row" style="justify-content:flex-end"><button class="btn ghost sm" data-view="${d.driver_id}">View</button>${d.participation_status==="ACTIVE"?`<button class="btn go sm" data-adj="${d.driver_id}">Adjust points</button><button class="btn danger sm" data-drop="${d.driver_id}">Drop</button>`:""}</div></td></tr>`).join("")
     || `<tr><td colspan="6" class="empty">No drivers yet. Approve an application to add one.</td></tr>`}
   </tbody></table></div></div>${src("driver","user_account","point_transaction","notification","audit_event")}`;
 };
@@ -54,8 +59,93 @@ async function dropDriver(d){
   toast(`${name} dropped`); App.render();
 }
 
+
+/* ---------- Driver detail (Driver details, Driver point balance, Driver Point History,
+   View Driver Purchase History, Update Driver's Information) ---------- */
+
+function mockDriverDetail(id){
+  const d = driver(id), u = user(id), s = sponsor(mySponsor());
+  const transactions = DB.point_transaction.filter(t=>t.driver_id===id && t.sponsor_id===s.sponsor_id)
+    .sort((a,b)=>b.created_at.localeCompare(a.created_at)).map(t=>({ ...t, performed_by: uname(t.performed_by_user_id) }));
+  const orders = DB.customer_order.filter(o=>o.driver_id===id && o.sponsor_id===s.sponsor_id)
+    .map(o=>({ ...o, items: DB.order_item.filter(i=>i.order_id===o.order_id).map(i=>({ ...i, product_name: product(i.product_id)?.product_name })) }));
+  return { driver: { driver_id:id, username:u.username, first_name:u.first_name, last_name:u.last_name, email:u.email, phone:u.phone,
+    account_status:u.account_status, participation_status:d.participation_status, joined_at:d.joined_at, current_points:d.current_points },
+    sponsor: s, transactions, orders };
+}
+
+async function driverDetailView(id){
+  const { driver: d, sponsor: s, transactions, orders } = LIVE ? await App.api(`/api/sponsor/drivers/${id}`) : mockDriverDetail(id);
+  const field = (k, label, type="text") => `<label class="field">${label}<input type="${type}" data-f="${k}" value="${esc(d[k] ?? "")}"></label>`;
+  const txRows = transactions.map(t=>`<div class="li"><div>${esc(t.reason)}<br>
+      <span class="dim">${fmtDT(t.created_at)}${t.performed_by?` · by ${esc(t.performed_by)}`:""} · Balance ${n(t.balance_after)}</span></div>
+      <b style="color:${t.points_delta<0?"var(--red)":"inherit"}">${t.points_delta>0?"+":""}${n(t.points_delta)}</b></div>`).join("");
+  const orderRows = orders.map(o=>`<div class="li"><div><b>Order #${o.order_id}</b> · ${fmtD(o.placed_at)}<br>
+      <span class="dim">${o.items.map(i=>`${esc(i.product_name)} × ${i.quantity}`).join(", ") || "No items"}</span></div>
+      <div style="text-align:right">${badge(o.status)}<br><b>${n(o.total_points)} pts</b></div></div>`).join("");
+  return `<div class="head"><div><button class="btn ghost sm" id="backToDrivers">← All drivers</button>
+      <h1 style="margin-top:10px">${esc(d.first_name)} ${esc(d.last_name)}</h1>
+      <p class="sub">${badge(d.participation_status)}${d.account_status!=="ACTIVE"?" "+badge(d.account_status):""} · ${esc(d.username)} · Joined ${fmtD(d.joined_at)}</p></div>
+    <div class="panel" style="text-align:right"><span class="dim">Points with ${esc(s.sponsor_name)}</span><br>
+      <b style="font-size:28px">${n(d.current_points)}</b><br><span class="dim">${usd(d.current_points*s.point_dollar_rate)}</span></div></div>
+  <div class="grid g2">
+    <div class="panel"><h2>Contact info</h2><form id="driverForm" class="grid" style="gap:12px">
+      <div class="grid g2" style="gap:12px">${field("first_name","First name")}${field("last_name","Last name")}</div>
+      ${field("email","Email","email")}${field("phone","Phone","tel")}
+      <button class="btn go" id="saveDriver">Save changes</button></form>
+      <p class="dim" style="margin-top:10px">Changes are logged and the driver gets a notification.</p></div>
+    <div class="grid">
+      <div class="panel flush"><h2 style="padding:18px 18px 0">Point history</h2><div class="list">${txRows || `<div class="empty">No point changes with your organization yet.</div>`}</div></div>
+      <div class="panel flush"><h2 style="padding:18px 18px 0">Purchase history</h2><div class="list">${orderRows || `<div class="empty">No orders with your organization yet.</div>`}</div></div>
+    </div>
+  </div>${src("user_account","driver_sponsor","point_transaction","customer_order","audit_event")}`;
+}
+
+function bindDriverDetail(){
+  $("#backToDrivers").onclick = () => { viewingId = null; App.render(); };
+  $("#driverForm").onsubmit = async e => {
+    e.preventDefault();
+    const body = Object.fromEntries([...document.querySelectorAll("[data-f]")].map(i=>[i.dataset.f, i.value.trim()]));
+    if (LIVE) {
+      try { const r = await App.api(`/api/sponsor/drivers/${viewingId}`, { method: "PATCH", body });
+            toast(r.changed.length ? "Driver info saved" : "Nothing changed"); App.render(); }
+      catch (err) { toast(err.message); }
+      return;
+    }
+    Object.assign(user(viewingId), body); toast("Driver info saved"); App.render();
+  };
+}
+
+function addDriverDialog(){
+  $("#dlgBody").innerHTML = `<h2>Add a driver</h2>
+    <p class="dim">They join your program right away, no application needed. Share the temporary password with them.</p>
+    <div class="grid g2" style="gap:12px"><label class="field">First name<input type="text" id="nd_first" required></label>
+      <label class="field">Last name<input type="text" id="nd_last" required></label></div>
+    <label class="field">Email<input type="email" id="nd_email" required></label>
+    <label class="field">Phone (optional)<input type="tel" id="nd_phone"></label>
+    <label class="field">Username<input type="text" id="nd_user" required autocomplete="off"></label>
+    <label class="field">Temporary password<input type="text" id="nd_pass" required autocomplete="off"></label>
+    <div class="row" style="justify-content:flex-end"><button class="btn ghost" value="cancel" formnovalidate>Cancel</button><button class="btn go" value="ok">Add driver</button></div>`;
+  const dlg = $("#dlg"); dlg.showModal();
+  dlg.onclose = async () => {
+    if (dlg.returnValue !== "ok") return;
+    if (!LIVE) return toast("Adding drivers needs the live server.");
+    const body = { first_name: $("#nd_first").value, last_name: $("#nd_last").value, email: $("#nd_email").value,
+                   phone: $("#nd_phone").value, username: $("#nd_user").value, password: $("#nd_pass").value };
+    try { await App.api("/api/sponsor/drivers", { method: "POST", body }); toast(`${body.first_name} added`); App.render(); }
+    catch (err) {   // reopen with what they typed so they can fix it
+      toast(err.message); addDriverDialog();
+      const ids = { first_name:"first", last_name:"last", email:"email", phone:"phone", username:"user", password:"pass" };
+      for (const [k, id] of Object.entries(ids)) $("#nd_"+id).value = body[k];
+    }
+  };
+}
+
 bind.sponsor.drivers = () => {
+  if (viewingId) return bindDriverDetail();
   const find = id => driverRows.find(d=>d.driver_id===id);
+  $("#addDriver").onclick = addDriverDialog;
+  document.querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>{ viewingId = +b.dataset.view; App.render(); });
   $("#dq").oninput=e=>document.querySelectorAll("[data-row]").forEach(r=>r.hidden=!r.dataset.row.includes(e.target.value.toLowerCase()));
   document.querySelectorAll("[data-adj]").forEach(b=>b.onclick=()=>{ const d=find(+b.dataset.adj); adjustDialog(d.driver_id, `${d.first_name} ${d.last_name}`); });
   document.querySelectorAll("[data-drop]").forEach(b=>b.onclick=()=>dropDriver(find(+b.dataset.drop)));

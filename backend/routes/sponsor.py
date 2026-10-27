@@ -11,6 +11,9 @@ Drivers (sponsor/drivers.html)
     GET  /api/sponsor/drivers                         my drivers + my point value
     POST /api/sponsor/drivers/<id>/points             {"delta": 500, "reason": "..."}
     POST /api/sponsor/drivers/<id>/drop               forfeits their points, pauses their schedules
+    POST /api/sponsor/drivers                         create a driver already in my program (New Driver User)
+    GET  /api/sponsor/drivers/<id>                    one driver: profile, my membership, point + purchase history
+    PATCH /api/sponsor/drivers/<id>                   {"first_name", "last_name", "email", "phone"} (Update Driver's Information)
 
 Recurring points (sponsor/schedules.html)
     GET  /api/sponsor/schedules                       schedules + active drivers for the form
@@ -37,10 +40,11 @@ Organization (sponsor/organization.html)
 """
 from decimal import Decimal, InvalidOperation
 
+import mysql.connector
 from flask import Blueprint, g, jsonify, request
 
 import ebay
-from accounts import EMAIL_RE
+from accounts import EMAIL_RE, AccountError, clean_profile, create_user
 from audit import log_audit, notify
 from auth import require_role
 from db import query, transaction
@@ -195,6 +199,108 @@ def drivers():
             ORDER BY (d.participation_status = 'ACTIVE') DESC, u.last_name, u.first_name""",
         (sid,))
     return jsonify(sponsor=sponsor, drivers=rows)
+
+
+DRIVER_PROFILE_FIELDS = ("first_name", "last_name", "email", "phone")
+
+
+@bp.post("/drivers")
+@require_role("sponsor")
+def create_driver():
+    """New Driver User: make a driver account that starts ACTIVE in my program (no application needed).
+    Body: {"username", "password", "first_name", "last_name", "email", "phone"?}"""
+    data = request.get_json(silent=True) or {}
+    try:
+        with transaction() as cur:
+            driver_id = create_user(cur, "driver", username=data.get("username"), password=data.get("password"),
+                                    first_name=data.get("first_name"), last_name=data.get("last_name"),
+                                    email=data.get("email"), phone=data.get("phone"),
+                                    sponsor_id=g.user["sponsor_id"], created_by=g.user["user_id"])
+    except AccountError as e:
+        return jsonify(error=str(e)), 400
+    return jsonify(ok=True, driver_id=driver_id), 201
+
+
+@bp.get("/drivers/<int:driver_id>")
+@require_role("sponsor")
+def driver_detail(driver_id):
+    """Driver details + Driver point balance + Driver Point History + View Driver Purchase History.
+    Everything is scoped to MY sponsor, so other sponsors' points and orders for this driver stay hidden."""
+    sid = g.user["sponsor_id"]
+    driver = query(
+        """SELECT u.user_id AS driver_id, u.username, u.first_name, u.last_name, u.email, u.phone,
+                  u.account_status, m.participation_status, m.joined_at, m.current_points
+             FROM DRIVER_SPONSOR m JOIN USER_ACCOUNT u ON u.user_id = m.driver_id
+            WHERE m.driver_id = %s AND m.sponsor_id = %s""",
+        (driver_id, sid), one=True)
+    if driver is None:
+        return jsonify(error="Driver not found."), 404
+    sponsor = query("SELECT sponsor_name, point_dollar_rate FROM SPONSOR_ORGANIZATION WHERE sponsor_id = %s",
+                    (sid,), one=True)
+    transactions = query(
+        """SELECT pt.point_transaction_id, pt.points_delta, pt.balance_after, pt.reason, pt.created_at,
+                  CONCAT(p.first_name, ' ', p.last_name) AS performed_by
+             FROM POINT_TRANSACTION pt
+             LEFT JOIN USER_ACCOUNT p ON p.user_id = pt.performed_by_user_id
+            WHERE pt.driver_id = %s AND pt.sponsor_id = %s
+            ORDER BY pt.created_at DESC, pt.point_transaction_id DESC""",
+        (driver_id, sid))
+    orders = query(
+        """SELECT order_id, status, total_points, total_dollar_amount, placed_at, cancelled_at
+             FROM CUSTOMER_ORDER WHERE driver_id = %s AND sponsor_id = %s
+            ORDER BY placed_at DESC, order_id DESC""",
+        (driver_id, sid))
+    items = query(
+        """SELECT i.order_id, i.quantity, i.unit_point_price, p.product_name
+             FROM ORDER_ITEM i
+             JOIN CUSTOMER_ORDER o ON o.order_id = i.order_id
+             JOIN PRODUCT p ON p.product_id = i.product_id
+            WHERE o.driver_id = %s AND o.sponsor_id = %s
+            ORDER BY i.order_id, i.line_number""",
+        (driver_id, sid))
+    by_order = {}
+    for item in items:
+        by_order.setdefault(item["order_id"], []).append(item)
+    for o in orders:
+        o["items"] = by_order.get(o["order_id"], [])
+    return jsonify(driver=driver, sponsor=sponsor, transactions=transactions, orders=orders)
+
+
+@bp.patch("/drivers/<int:driver_id>")
+@require_role("sponsor")
+def update_driver(driver_id):
+    """Update Driver's Information (contact info). Logged to AUDIT_EVENT (Recording Driving) and the driver is notified."""
+    data = request.get_json(silent=True) or {}
+    try:
+        first_name, last_name, email, phone = clean_profile(*(data.get(k) for k in DRIVER_PROFILE_FIELDS))
+    except AccountError as e:
+        return jsonify(error=str(e)), 400
+
+    me, sid = g.user["user_id"], g.user["sponsor_id"]
+    with transaction() as cur:
+        if _my_driver(cur, driver_id) is None:
+            return jsonify(error="Driver not found."), 404
+        cur.execute("SELECT 1 FROM USER_ACCOUNT WHERE LOWER(email) = %s AND user_id <> %s LIMIT 1", (email, driver_id))
+        if cur.fetchone():
+            return jsonify(error="An account with that email already exists."), 400
+        cur.execute("SELECT username, first_name, last_name, email, phone FROM USER_ACCOUNT WHERE user_id = %s FOR UPDATE",
+                    (driver_id,))
+        before = cur.fetchone()
+        after = dict(zip(DRIVER_PROFILE_FIELDS, (first_name, last_name, email, phone)))
+        changed = [k for k in DRIVER_PROFILE_FIELDS if before[k] != after[k]]
+        if changed:
+            try:
+                cur.execute("UPDATE USER_ACCOUNT SET first_name = %s, last_name = %s, email = %s, phone = %s "
+                            "WHERE user_id = %s", (first_name, last_name, email, phone, driver_id))
+            except mysql.connector.IntegrityError:  # someone took the email a moment ago
+                return jsonify(error="An account with that email already exists."), 400
+            fields = ", ".join(k.replace("_", " ") for k in changed)
+            log_audit(cur, "DRIVER_UPDATE", True, actor_user_id=me, sponsor_id=sid, driver_id=driver_id,
+                      subject_username=before["username"], entity_type="USER_ACCOUNT", entity_id=driver_id,
+                      details=f"Sponsor updated driver info: {fields}")
+            notify(cur, driver_id, "PROFILE_UPDATED",
+                   f"{g.user['sponsor_name']} updated your {fields}. Contact them if this wasn't expected.")
+    return jsonify(ok=True, changed=changed)
 
 
 @bp.post("/drivers/<int:driver_id>/points")
