@@ -75,9 +75,10 @@ from routes import driver, driver_commerce
 application.register_blueprint(driver.bp)
 from routes import sponsor
 application.register_blueprint(sponsor.bp)
-from routes import admin, admin_audit
+from routes import admin, admin_audit, bulk_import
 application.register_blueprint(admin.bp)
 application.register_blueprint(admin_audit.bp)
+application.register_blueprint(bulk_import.bp)
 
 
 @application.route("/")

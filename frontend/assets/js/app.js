@@ -19,7 +19,7 @@ const ME = {};
 const VIEWS = { driver:{}, sponsor:{}, admin:{} };
 const bind = { driver:{}, sponsor:{}, admin:{} };
 const HOME = { driver:"driver/dashboard", sponsor:"sponsor/drivers", admin:"admin/users" };
-const ROUTES = {"driver": [["dashboard", "Dashboard"], ["catalog", "Catalog"], ["cart", "Cart"], ["orders", "Orders"], ["points", "Point history"], ["sponsor", "My sponsors"], ["notifications", "Notifications"], ["profile", "Profile"]], "sponsor": [["drivers", "Drivers"], ["applications", "Applications"], ["schedules", "Recurring points"], ["catalog", "Catalog"], ["orders", "Orders"], ["reports", "Reports"], ["organization", "Organization"]], "admin": [["users", "Users"], ["sponsors", "Sponsors"], ["audit", "Audit log"], ["reports", "Sales reports"], ["about", "About"]]};
+const ROUTES = {"driver": [["dashboard", "Dashboard"], ["catalog", "Catalog"], ["cart", "Cart"], ["orders", "Orders"], ["points", "Point history"], ["sponsor", "My sponsors"], ["notifications", "Notifications"], ["profile", "Profile"]], "sponsor": [["drivers", "Drivers"], ["applications", "Applications"], ["schedules", "Recurring points"], ["catalog", "Catalog"], ["orders", "Orders"], ["reports", "Reports"], ["organization", "Organization"], ["bulk-import", "Bulk import"]], "admin": [["users", "Users"], ["sponsors", "Sponsors"], ["audit", "Audit log"], ["reports", "Sales reports"], ["about", "About"], ["bulk-import", "Bulk import"]]};
 
 const store = {
   get(k){ try { return JSON.parse(sessionStorage.getItem(k)); } catch { return null; } },
