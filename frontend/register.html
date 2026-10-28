@@ -47,8 +47,14 @@
       <label class="field">
         Password
         <input id="password" type="password" autocomplete="new-password" aria-describedby="passwordRequirements" required>
-        <span id="passwordRequirements" class="dim" style="font-weight:400">Use at least 8 characters, including an uppercase letter, a lowercase letter, a number, and a symbol.</span>
       </label>
+      <ul id="passwordRequirements" class="password-checklist" aria-label="Password requirements">
+        <li data-rule="length"><span class="requirement-icon" aria-hidden="true">○</span>At least 8 characters<span class="requirement-status">: not met</span></li>
+        <li data-rule="upper"><span class="requirement-icon" aria-hidden="true">○</span>Uppercase letter<span class="requirement-status">: not met</span></li>
+        <li data-rule="lower"><span class="requirement-icon" aria-hidden="true">○</span>Lowercase letter<span class="requirement-status">: not met</span></li>
+        <li data-rule="number"><span class="requirement-icon" aria-hidden="true">○</span>Number<span class="requirement-status">: not met</span></li>
+        <li data-rule="symbol"><span class="requirement-icon" aria-hidden="true">○</span>Symbol<span class="requirement-status">: not met</span></li>
+      </ul>
 
       <label class="field">
         Confirm password
@@ -71,6 +77,26 @@
 <script>
 const passwordInput = document.querySelector("#password");
 const confirmPasswordInput = document.querySelector("#confirmPassword");
+function updatePasswordRequirements() {
+  const value = passwordInput.value;
+  const checks = {
+    length: Array.from(value).length >= 8,
+    upper: /[A-Z]/.test(value),
+    lower: /[a-z]/.test(value),
+    number: /[0-9]/.test(value),
+    symbol: /[^A-Za-z0-9]/.test(value)
+  };
+  document.querySelectorAll("#passwordRequirements li").forEach(item => {
+    const met = checks[item.dataset.rule];
+    item.classList.toggle("is-met", met);
+    item.querySelector(".requirement-icon").textContent = met ? "✓" : "○";
+    item.querySelector(".requirement-status").textContent = met ? ": met" : ": not met";
+  });
+}
+passwordInput.addEventListener("input", updatePasswordRequirements);
+passwordInput.addEventListener("change", updatePasswordRequirements);
+window.addEventListener("pageshow", updatePasswordRequirements);
+updatePasswordRequirements();
 function updatePasswordMatch() {
   const message = document.querySelector("#passwordMatch");
   const hasConfirmation = confirmPasswordInput.value.length > 0;
