@@ -207,6 +207,14 @@ body.auth{min-height:100vh;display:grid;grid-template-columns:minmax(320px,1fr) 
 .auth-err{background:var(--red-bg);color:var(--red);border-radius:7px;padding:10px 12px;font-weight:700;font-size:14px}
 .auth-err:empty{display:none}
 .auth-card .btn.go{padding:12px;font-size:17px}
+.password-checklist{list-style:none;margin:-6px 0 0;padding:12px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;border:1px solid var(--line);border-radius:8px;color:var(--muted);font-size:14px}
+.password-checklist li{display:flex;align-items:baseline;gap:7px}
+.password-checklist .requirement-icon{flex-shrink:0;width:1em;text-align:center;font-weight:800}
+.password-checklist .is-met .requirement-icon{color:#16803c}
+:root[data-theme="dark"] .password-checklist .is-met .requirement-icon{color:#4ade80}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]) .password-checklist .is-met .requirement-icon{color:#4ade80}}
+.password-checklist .requirement-status{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+@media(max-width:380px){.password-checklist{grid-template-columns:1fr}}
 .demo{margin-top:26px;border-top:1px solid var(--line);padding-top:16px}
 .demo p{margin:0 0 8px;font-size:13px;color:var(--muted);font-weight:700}
 .demo .row button{flex:1}
