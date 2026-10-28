@@ -182,10 +182,10 @@ body.auth{min-height:100vh;display:grid;grid-template-columns:minmax(320px,1fr) 
 .auth-sign p{margin:0 auto;opacity:.92;font-size:17px;max-width:40ch}
 .auth-sign .sign-exit{display:inline-block;margin-top:18px}
 @media (min-width:861px){
-  .login-page .auth-sign{max-width:600px}
-  .login-page .auth-sign h1{font-size:clamp(34px,4.6vw,62px)}
-  .login-page .auth-sign .sign-label{font-size:18px}
-  .login-page .auth-sign p{font-size:19px}
+  .login-page .auth-sign{max-width:660px}
+  .login-page .auth-sign h1{font-size:clamp(36px,5vw,68px)}
+  .login-page .auth-sign .sign-label{font-size:20px}
+  .login-page .auth-sign p{font-size:21px}
 }
 .auth-note{
   justify-self:start;
