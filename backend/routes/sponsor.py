@@ -338,10 +338,8 @@ def drop_driver(driver_id):
             cur.execute("UPDATE DRIVER_SPONSOR SET participation_status = 'DROPPED' WHERE driver_id = %s AND sponsor_id = %s", (driver_id, sid))
             cur.execute("UPDATE RECURRING_POINT_SCHEDULE SET is_active = FALSE WHERE driver_id = %s AND sponsor_id = %s",
                         (driver_id, sid))
-            cur.execute("SELECT drop_alert_enabled FROM ALERT_PREFERENCE WHERE user_id = %s", (driver_id,))
-            pref = cur.fetchone()
-            if pref is None or pref["drop_alert_enabled"]:
-                notify(cur, driver_id, "DROPPED", f"You were dropped from {g.user['sponsor_name']}.")
+            # Always sent: drivers can't turn drop alerts off, whatever ALERT_PREFERENCE says.
+            notify(cur, driver_id, "DROPPED", f"You were dropped from {g.user['sponsor_name']}.")
             log_audit(cur, "DRIVER_DROP", True, actor_user_id=me, sponsor_id=sid, driver_id=driver_id,
                       subject_username=d["username"], entity_type="DRIVER", entity_id=driver_id,
                       details=f"Dropped from program; {forfeited:,} points forfeited")
