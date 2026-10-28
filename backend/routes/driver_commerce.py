@@ -13,6 +13,8 @@ from db import query, transaction
 from points import PointsError, change_points
 from routes.driver import bp
 
+CANCEL_WINDOW_DAYS = 3   # drivers may cancel a PLACED order for this many days after placing it
+
 
 def _membership(cur):
     cur.execute('''SELECT m.current_points FROM DRIVER_SPONSOR m
@@ -47,12 +49,15 @@ def driver_points():
 @bp.get('/orders')
 @require_role('driver')
 def driver_orders():
-    rows = query('''SELECT * FROM CUSTOMER_ORDER WHERE driver_id = %s AND sponsor_id = %s
-        ORDER BY order_id DESC''', (g.user['user_id'], g.user['sponsor_id']))
+    rows = query('''SELECT *, placed_at + INTERVAL %s DAY AS cancel_until,
+        (status = 'PLACED' AND NOW() < placed_at + INTERVAL %s DAY) AS can_cancel
+        FROM CUSTOMER_ORDER WHERE driver_id = %s AND sponsor_id = %s
+        ORDER BY order_id DESC''', (CANCEL_WINDOW_DAYS, CANCEL_WINDOW_DAYS, g.user['user_id'], g.user['sponsor_id']))
     for order in rows:
+        order['can_cancel'] = bool(order['can_cancel'])
         order['items'] = query('''SELECT i.*, p.product_name FROM ORDER_ITEM i JOIN PRODUCT p USING (product_id)
             WHERE i.order_id = %s AND i.sponsor_id = %s''', (order['order_id'], g.user['sponsor_id']))
-    return jsonify(orders=rows)
+    return jsonify(orders=rows, cancel_window_days=CANCEL_WINDOW_DAYS)
 
 
 @bp.get('/cart')
@@ -153,12 +158,15 @@ def cancel_driver_order(order_id):
     uid = g.user['user_id']
     try:
         with transaction() as cur:
-            cur.execute("SELECT sponsor_id, status, total_points FROM CUSTOMER_ORDER WHERE order_id = %s AND driver_id = %s FOR UPDATE", (order_id, uid))
+            cur.execute('''SELECT sponsor_id, status, total_points, NOW() < placed_at + INTERVAL %s DAY AS in_window
+                FROM CUSTOMER_ORDER WHERE order_id = %s AND driver_id = %s FOR UPDATE''', (CANCEL_WINDOW_DAYS, order_id, uid))
             order = cur.fetchone()
             if order is None:
                 return jsonify(error='Order not found.'), 404
             if order['status'] != 'PLACED':
                 return jsonify(error='Only placed orders can be cancelled.'), 409
+            if not order['in_window']:
+                return jsonify(error=f'Orders can only be cancelled within {CANCEL_WINDOW_DAYS} days of being placed.'), 409
             sid = order['sponsor_id']
             if order['total_points']:
                 change_points(cur, uid, sid, int(order['total_points']),

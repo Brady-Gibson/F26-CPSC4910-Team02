@@ -163,3 +163,11 @@ def test_update_organization_validation(client):
     assert client.patch("/api/sponsor/organization", json={"point_dollar_rate": "0.005"}).status_code == 400
     assert client.patch("/api/sponsor/organization", json={"point_dollar_rate": "abc"}).status_code == 400
     assert client.patch("/api/sponsor/organization", json={"point_dollar_rate": "0.01", "contact_email": "nope"}).status_code == 400
+
+
+def test_drop_alert_is_sent_even_if_the_preference_is_off(client, db):
+    with db.cursor() as cur:
+        cur.execute("UPDATE ALERT_PREFERENCE SET drop_alert_enabled = FALSE WHERE user_id = %s", (DRIVER,))
+    login(client)
+    assert client.post(f"/api/sponsor/drivers/{DRIVER}/drop").status_code == 200
+    assert one(db, "SELECT 1 AS ok FROM NOTIFICATION WHERE user_id=%s AND notification_type='DROPPED'", DRIVER)

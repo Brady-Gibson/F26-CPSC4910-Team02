@@ -99,11 +99,13 @@ function installLiveDriverViews() {
     });
   };
   VIEWS.driver.orders = async () => {
-    const { orders } = await App.api('/api/driver/orders');
-    return heading('Orders') + orders.map(o => `<div class="panel"><h2>Order #${o.order_id}</h2>${badge(o.status)}
+    const { orders, cancel_window_days: days } = await App.api('/api/driver/orders');
+    return heading('Orders') + `<p class="dim">You can cancel an order within ${days} days of placing it, until it ships. Points go back to your balance.</p>` +
+      orders.map(o => `<div class="panel"><h2>Order #${o.order_id}</h2>${badge(o.status)}
       <p>${fmtD(o.placed_at)} · ${n(o.total_points)} points</p>
       ${o.items.map(i => `<p>${esc(i.product_name)} · ${i.quantity} × ${n(i.unit_point_price)} points</p>`).join('')}
-      ${o.status === 'PLACED' && !App.me.viewed_by ? `<button class="btn danger" data-live-cancel="${o.order_id}">Cancel order</button>` : ''}</div>`).join('') +
+      ${o.can_cancel && !App.me.viewed_by ? `<button class="btn danger" data-live-cancel="${o.order_id}">Cancel order</button>
+        <span class="dim">Cancel by ${fmtDT(o.cancel_until)}</span>` : ''}</div>`).join('') +
       (orders.length ? '' : '<div class="panel">No orders with this sponsor.</div>');
   };
   bind.driver.orders = () => document.querySelectorAll('[data-live-cancel]').forEach(button => {

@@ -136,3 +136,16 @@ def test_driver_refund_uses_original_sponsor_and_checks_ownership(client, db):
     assert client.post('/api/driver/orders/900001/cancel').status_code == 200
     assert balance(db, 900001) == 1000 and balance(db, 900010) == 200
     assert client.post('/api/driver/orders/900001/cancel').status_code == 409
+
+
+def test_driver_can_only_cancel_within_the_window(client, db):
+    login(client, 'testdriver')
+    orders = client.get('/api/driver/orders').get_json()
+    assert orders['cancel_window_days'] == 3 and orders['orders'][0]['can_cancel'] is True
+    with db.cursor() as cur:
+        cur.execute('UPDATE CUSTOMER_ORDER SET placed_at = NOW() - INTERVAL 4 DAY WHERE order_id = 900001')
+    assert client.get('/api/driver/orders').get_json()['orders'][0]['can_cancel'] is False
+    r = client.post('/api/driver/orders/900001/cancel')
+    assert r.status_code == 409 and '3 days' in r.get_json()['error']
+    assert balance(db, 900001) == 500
+    assert one(db, 'SELECT status FROM CUSTOMER_ORDER WHERE order_id = 900001')['status'] == 'PLACED'
