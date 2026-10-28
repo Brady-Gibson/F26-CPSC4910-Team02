@@ -46,7 +46,10 @@
 
       <label class="field">
         Password
-        <input id="password" type="password" autocomplete="new-password" aria-describedby="passwordRequirements" required>
+        <span class="pw">
+          <input id="password" type="password" autocomplete="new-password" aria-describedby="passwordRequirements" required>
+          <button type="button" data-password-toggle="password" aria-controls="password" aria-label="Show password">Show</button>
+        </span>
       </label>
       <ul id="passwordRequirements" class="password-checklist" aria-label="Password requirements">
         <li data-rule="length"><span class="requirement-icon" aria-hidden="true">○</span>At least 8 characters<span class="requirement-status">: not met</span></li>
@@ -58,7 +61,10 @@
 
       <label class="field">
         Confirm password
-        <input id="confirmPassword" type="password" autocomplete="new-password" aria-describedby="passwordMatch" required>
+        <span class="pw">
+          <input id="confirmPassword" type="password" autocomplete="new-password" aria-describedby="passwordMatch" required>
+          <button type="button" data-password-toggle="confirmPassword" aria-controls="confirmPassword" aria-label="Show confirm password">Show</button>
+        </span>
         <span id="passwordMatch" role="status" aria-live="polite" style="font-weight:400"></span>
       </label>
 
@@ -77,6 +83,16 @@
 <script>
 const passwordInput = document.querySelector("#password");
 const confirmPasswordInput = document.querySelector("#confirmPassword");
+document.querySelectorAll("[data-password-toggle]").forEach(button => {
+  button.addEventListener("click", () => {
+    const input = document.getElementById(button.dataset.passwordToggle);
+    const show = input.type === "password";
+    input.type = show ? "text" : "password";
+    button.textContent = show ? "Hide" : "Show";
+    const label = input.id === "confirmPassword" ? "confirm password" : "password";
+    button.setAttribute("aria-label", `${show ? "Hide" : "Show"} ${label}`);
+  });
+});
 function updatePasswordRequirements() {
   const value = passwordInput.value;
   const checks = {
