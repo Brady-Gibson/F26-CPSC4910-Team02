@@ -17,7 +17,7 @@
 <script src="../assets/js/app.js"></script>
 <script>
 /* LIVE: GET /api/sponsor/organization, PATCH /api/sponsor/organization {point_dollar_rate, contact_email, phone}
-   "Invite sponsor user" has no endpoint yet (sponsor-user creation is on the roadmap). */
+   Invite sponsor user: POST /api/sponsor/organization/users */
 
 function mockOrganization(){
   const s = sponsor(mySponsor());
@@ -34,7 +34,7 @@ VIEWS.sponsor.organization = async () => {
     <label class="field">Phone<input type="tel" id="cp" value="${esc(s.phone)}"></label>
     <button class="btn go" id="saveO">Save changes</button></div>${src("sponsor_organization")}</div>
   <div class="panel flush"><h2>Team</h2><div class="list">${team.map(t=>`<div class="li"><div><b>${esc(t.first_name)} ${esc(t.last_name)}</b><br><span class="dim">${t.job_title?esc(t.job_title)+" · ":""}${esc(t.email)}</span></div>${badge(t.account_status)}</div>`).join("")}</div>
-  <div style="padding:0 18px 16px"><button class="btn ghost" disabled title="Coming soon">Invite sponsor user</button>${src("sponsor_user","user_account")}</div></div></div>`;
+  <div style="padding:0 18px 16px"><button class="btn ghost" id="inviteUser">Invite sponsor user</button>${src("sponsor_user","user_account")}</div></div></div>`;
 };
 
 async function saveOrganization(){
@@ -47,7 +47,34 @@ async function saveOrganization(){
   Object.assign(sponsor(mySponsor()), { ...body, point_dollar_rate: +body.point_dollar_rate }); toast("Changes saved");
 }
 
-bind.sponsor.organization = () => { $("#saveO").onclick = saveOrganization; };
+function inviteDialog(){
+  $("#dlgBody").innerHTML = `<h2>Invite a sponsor user</h2>
+    <p class="dim">They join your organization as a sponsor user right away. Share the temporary password with them.</p>
+    <div class="grid g2" style="gap:12px"><label class="field">First name<input type="text" id="su_first" required></label>
+      <label class="field">Last name<input type="text" id="su_last" required></label></div>
+    <label class="field">Email<input type="email" id="su_email" required></label>
+    <div class="grid g2" style="gap:12px"><label class="field">Phone (optional)<input type="tel" id="su_phone"></label>
+      <label class="field">Job title (optional)<input type="text" id="su_title" maxlength="100"></label></div>
+    <label class="field">Username<input type="text" id="su_user" required autocomplete="off"></label>
+    <label class="field">Temporary password<input type="text" id="su_pass" required autocomplete="off"></label>
+    <div class="row" style="justify-content:flex-end"><button class="btn ghost" value="cancel" formnovalidate>Cancel</button><button class="btn go" value="ok">Add sponsor user</button></div>`;
+  const dlg = $("#dlg"); dlg.showModal();
+  dlg.onclose = async () => {
+    if (dlg.returnValue !== "ok") return;
+    if (!LIVE) return toast("Adding sponsor users needs the live server.");
+    const body = { first_name: $("#su_first").value, last_name: $("#su_last").value, email: $("#su_email").value,
+                   phone: $("#su_phone").value, job_title: $("#su_title").value,
+                   username: $("#su_user").value, password: $("#su_pass").value };
+    try { await App.api("/api/sponsor/organization/users", { method: "POST", body }); toast(`${body.first_name} added to your team`); App.render(); }
+    catch (err) {   // reopen with what they typed so they can fix it
+      toast(err.message); inviteDialog();
+      const ids = { first_name:"first", last_name:"last", email:"email", phone:"phone", job_title:"title", username:"user", password:"pass" };
+      for (const [k, id] of Object.entries(ids)) $("#su_"+id).value = body[k];
+    }
+  };
+}
+
+bind.sponsor.organization = () => { $("#saveO").onclick = saveOrganization; $("#inviteUser").onclick = inviteDialog; };
 
 App.start("sponsor", "organization");
 </script>
