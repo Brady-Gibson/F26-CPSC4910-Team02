@@ -23,6 +23,9 @@ button,input,select,textarea{font:inherit;color:inherit}
 /* Shell */
 .shell{display:grid;grid-template-columns:248px 1fr;min-height:100vh}
 .rail{background:var(--asphalt);color:#E6EBF1;padding:20px 14px;display:flex;flex-direction:column;gap:18px;position:sticky;top:0;height:100vh;overflow:auto}
+/* Sidebar still scrolls on short screens, but without the gray scrollbar (Firefox, then Chrome/Edge/Safari) */
+.rail{scrollbar-width:none}
+.rail::-webkit-scrollbar{display:none}
 .brand{display:flex;align-items:center;gap:10px;font-weight:900;font-size:20px;letter-spacing:.2px;padding:0 6px}
 .shield{width:34px;height:34px;flex:none}
 .who{font-size:13px;color:#A9B6C6;padding:0 6px;line-height:1.35}
