@@ -37,6 +37,7 @@ Reports (sponsor/reports.html)
 Organization (sponsor/organization.html)
     GET   /api/sponsor/organization                   my company + my sponsor team
     PATCH /api/sponsor/organization                   {"point_dollar_rate", "contact_email", "phone"}
+    POST  /api/sponsor/organization/users             add a sponsor user to my organization (Invite sponsor user)
 """
 from decimal import Decimal, InvalidOperation
 
@@ -752,3 +753,20 @@ def update_organization():
         log_audit(cur, "ORGANIZATION", True, actor_user_id=me, sponsor_id=sid, entity_type="SPONSOR_ORGANIZATION",
                   entity_id=sid, details=f"Updated settings (1 point = ${rate})")
     return jsonify(ok=True)
+
+
+@bp.post("/organization/users")
+@require_role("sponsor")
+def create_sponsor_user():
+    """Invite sponsor user: make another sponsor account in MY organization (never someone else's).
+    Body: {"username", "password", "first_name", "last_name", "email", "phone"?, "job_title"?}"""
+    data = request.get_json(silent=True) or {}
+    try:
+        with transaction() as cur:
+            user_id = create_user(cur, "sponsor", username=data.get("username"), password=data.get("password"),
+                                  first_name=data.get("first_name"), last_name=data.get("last_name"),
+                                  email=data.get("email"), phone=data.get("phone"), job_title=data.get("job_title"),
+                                  sponsor_id=g.user["sponsor_id"], created_by=g.user["user_id"])
+    except AccountError as e:
+        return jsonify(error=str(e)), 400
+    return jsonify(ok=True, sponsor_user_id=user_id), 201
