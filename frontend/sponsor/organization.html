@@ -47,6 +47,18 @@ async function saveOrganization(){
   Object.assign(sponsor(mySponsor()), { ...body, point_dollar_rate: +body.point_dollar_rate }); toast("Changes saved");
 }
 
+function updateInviteRules(){
+  const v = $("#su_pass").value;
+  const checks = { length: Array.from(v).length >= 8, upper: /[A-Z]/.test(v), lower: /[a-z]/.test(v),
+                   number: /[0-9]/.test(v), symbol: /[^A-Za-z0-9]/.test(v) };
+  document.querySelectorAll("#su_pwRules li").forEach(li => {
+    const met = checks[li.dataset.rule];
+    li.classList.toggle("is-met", met);
+    li.querySelector(".requirement-icon").textContent = met ? "✓" : "○";
+    li.querySelector(".requirement-status").textContent = met ? ": met" : ": not met";
+  });
+}
+
 function inviteDialog(){
   $("#dlgBody").innerHTML = `<h2>Invite a sponsor user</h2>
     <p class="dim">They join your organization as a sponsor user right away. Share the temporary password with them.</p>
@@ -56,8 +68,23 @@ function inviteDialog(){
     <div class="grid g2" style="gap:12px"><label class="field">Phone (optional)<input type="tel" id="su_phone"></label>
       <label class="field">Job title (optional)<input type="text" id="su_title" maxlength="100"></label></div>
     <label class="field">Username<input type="text" id="su_user" required autocomplete="off"></label>
-    <label class="field">Temporary password<input type="text" id="su_pass" required autocomplete="off"></label>
+    <label class="field">Temporary password<span class="pw" style="display:block"><input type="password" id="su_pass" style="width:100%" required autocomplete="new-password" aria-describedby="su_pwRules">
+      <button type="button" id="su_showPw" aria-label="Show password">Show</button></span></label>
+    <ul id="su_pwRules" class="password-checklist" aria-label="Password requirements">
+      <li data-rule="length"><span class="requirement-icon" aria-hidden="true">○</span>At least 8 characters<span class="requirement-status">: not met</span></li>
+      <li data-rule="upper"><span class="requirement-icon" aria-hidden="true">○</span>Uppercase letter<span class="requirement-status">: not met</span></li>
+      <li data-rule="lower"><span class="requirement-icon" aria-hidden="true">○</span>Lowercase letter<span class="requirement-status">: not met</span></li>
+      <li data-rule="number"><span class="requirement-icon" aria-hidden="true">○</span>Number<span class="requirement-status">: not met</span></li>
+      <li data-rule="symbol"><span class="requirement-icon" aria-hidden="true">○</span>Symbol<span class="requirement-status">: not met</span></li>
+    </ul>
     <div class="row" style="justify-content:flex-end"><button class="btn ghost" value="cancel" formnovalidate>Cancel</button><button class="btn go" value="ok">Add sponsor user</button></div>`;
+  $("#su_showPw").onclick = () => {   // hide the password by default, with a Show/Hide toggle like the login page
+    const p = $("#su_pass"), show = p.type === "password";
+    p.type = show ? "text" : "password";
+    $("#su_showPw").textContent = show ? "Hide" : "Show";
+    $("#su_showPw").setAttribute("aria-label", show ? "Hide password" : "Show password");
+  };
+  $("#su_pass").oninput = updateInviteRules;   // same checklist as the register page
   const dlg = $("#dlg"); dlg.showModal();
   dlg.onclose = async () => {
     if (dlg.returnValue !== "ok") return;
@@ -69,7 +96,7 @@ function inviteDialog(){
     catch (err) {   // reopen with what they typed so they can fix it
       toast(err.message); inviteDialog();
       const ids = { first_name:"first", last_name:"last", email:"email", phone:"phone", job_title:"title", username:"user", password:"pass" };
-      for (const [k, id] of Object.entries(ids)) $("#su_"+id).value = body[k];
+      for (const [k, id] of Object.entries(ids)) $("#su_"+id).value = body[k]; updateInviteRules();
     }
   };
 }
