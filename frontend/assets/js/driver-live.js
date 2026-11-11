@@ -116,8 +116,34 @@ function installLiveDriverViews() {
   });
   VIEWS.driver.points = async () => {
     const { transactions } = await App.api('/api/driver/points');
-    return heading('Point history') + `<div class="panel">${transactions.map(t => `<div class="li"><div>${esc(t.reason)}
+    return heading('Point history') + `<div class="panel"><button type="button" class="btn go" id="download-point-history" ${App.me.sponsor_id ? '' : 'disabled'}>Download PDF</button></div><div class="panel">${transactions.map(t => `<div class="li"><div>${esc(t.reason)}
       <br><span class="dim">${fmtD(t.created_at)} · Balance: ${n(t.balance_after)}</span></div><b>${n(t.points_delta)} pts</b></div>`).join('') || 'No point transactions with this sponsor.'}</div>`;
   };
-  bind.driver.points = () => {};
+  bind.driver.points = () => {
+    const button = document.querySelector('#download-point-history');
+    button.onclick = async () => {
+      button.disabled = true;
+      button.textContent = 'Preparing PDF…';
+      try {
+        const response = await fetch('/api/driver/points/export.pdf', {credentials: 'same-origin'});
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          throw new Error(error.error || 'Unable to download point history. Please try again.');
+        }
+        const url = URL.createObjectURL(await response.blob());
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'point-history.pdf';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } catch (error) {
+        toast(error.message);
+      } finally {
+        button.disabled = !App.me.sponsor_id;
+        button.textContent = 'Download PDF';
+      }
+    };
+  };
 }

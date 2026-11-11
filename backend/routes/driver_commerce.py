@@ -5,12 +5,13 @@ charge twice. Prices and membership status are rechecked inside the transaction.
 """
 from decimal import Decimal
 
-from flask import g, jsonify, request
+from flask import g, jsonify, request, send_file
 
 from audit import log_audit, notify
 from auth import require_role
 from db import query, transaction
 from points import PointsError, change_points
+from point_history_pdf import build_point_history_pdf
 from routes.driver import bp
 
 CANCEL_WINDOW_DAYS = 3   # drivers may cancel a PLACED order for this many days after placing it
@@ -40,10 +41,25 @@ def driver_catalog():
 @bp.get('/points')
 @require_role('driver')
 def driver_points():
-    rows = query('''SELECT point_transaction_id, points_delta, balance_after, reason, created_at
+    return jsonify(transactions=_point_history(), sponsor_id=g.user['sponsor_id'])
+
+
+def _point_history():
+    return query('''SELECT point_transaction_id, points_delta, balance_after, reason, created_at
         FROM POINT_TRANSACTION WHERE driver_id = %s AND sponsor_id = %s
         ORDER BY created_at DESC, point_transaction_id DESC''', (g.user['user_id'], g.user['sponsor_id']))
-    return jsonify(transactions=rows, sponsor_id=g.user['sponsor_id'])
+
+
+@bp.get('/points/export.pdf')
+@require_role('driver')
+def export_point_history():
+    if g.user['sponsor_id'] is None:
+        return jsonify(error='Select a sponsor before downloading point history.'), 400
+    report = build_point_history_pdf(g.user, _point_history())
+    response = send_file(report, mimetype='application/pdf', as_attachment=True,
+                         download_name=f"point-history-{g.user['sponsor_id']}.pdf")
+    response.headers['Cache-Control'] = 'no-store'
+    return response
 
 
 @bp.get('/orders')
