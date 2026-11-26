@@ -3,7 +3,11 @@
 -- per organization, 2 admins, open driver applications to accept and reject, plus point history, catalog items,
 -- orders, and schedules so reports have something to show.
 --
--- Run ONCE after schema.sql (it does not depend on seed_test_data.sql). IDs are in the 910000 range so they
+-- The last section also fills in Tiger Test Trucking (sponsor 900001), the company of the testsponsor / testdriver
+-- logins given to the instructor in Demo Info, so it needs the seed_test_data.sql rows 900001-900003 (already on
+-- RDS). It adds to their balances instead of overwriting them.
+--
+-- Run ONCE after schema.sql and seed_test_data.sql. IDs are in the 910000 range so they
 -- don't collide with the test seed. Every account gets the placeholder hash 'TEST_HASH_ONLY', which can't be
 -- logged into; then, from backend/, run:
 --     python scripts/set_test_passwords.py "<demo password>"
@@ -179,3 +183,102 @@ INSERT INTO AUDIT_EVENT (actor_user_id, sponsor_id, driver_id, category, subject
 (NULL, NULL, NULL, 'LOGIN', 'demodriver2', 'USER_ACCOUNT', 910022, FALSE, 'Failed login: wrong password', DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 5 DAY)),
 (910022, NULL, 910022, 'LOGIN', 'demodriver2', 'USER_ACCOUNT', 910022, TRUE, 'Signed in', DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 5 DAY)),
 (910011, 910001, 910022, 'ORDER', 'demodriver2', 'CUSTOMER_ORDER', 910003, TRUE, 'Cancelled order #910003 and refunded 2,000 points', DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 8 DAY));
+
+-- =====================================================
+-- TIGER TEST TRUCKING (sponsor 900001): the instructor's Demo Info logins
+-- testadmin / testsponsor / testdriver come from seed_test_data.sql. This gives their company a second sponsor
+-- user, a second driver, two open applications to accept/reject, a real catalog, and more history for testdriver.
+-- testdriver's balance is ADDED to (never overwritten), so it is safe on RDS where the app already changed it.
+-- =====================================================
+
+INSERT INTO USER_ACCOUNT (user_id, username, password_hash, first_name, last_name, email, phone, account_status) VALUES
+(910015, 'tiger_sponsor2', 'TEST_HASH_ONLY', 'Megan',  'Foster',  'mfoster@example.com',  '864-555-0115', 'ACTIVE'),
+(910025, 'tigerdriver2',   'TEST_HASH_ONLY', 'Lucas',  'Bennett', 'lbennett@example.com', '864-555-0125', 'ACTIVE'),
+(910034, 'applicant4',     'TEST_HASH_ONLY', 'Kayla',  'Morris',  'kmorris@example.com',  '864-555-0134', 'ACTIVE'),
+(910035, 'applicant5',     'TEST_HASH_ONLY', 'Devin',  'Price',   'dprice@example.com',   '864-555-0135', 'ACTIVE');
+
+INSERT INTO SPONSOR_USER (sponsor_user_id, sponsor_id, job_title) VALUES (910015, 900001, 'Driver Rewards Coordinator');
+
+INSERT INTO DRIVER (driver_id, sponsor_id, current_points, participation_status) VALUES
+(910025, 900001, 0, 'ACTIVE'),
+(910034, NULL, 0, 'APPLICANT'),
+(910035, NULL, 0, 'APPLICANT');
+
+INSERT INTO DRIVER_SPONSOR (driver_id, sponsor_id, current_points, participation_status, joined_at) VALUES
+(910025, 900001, 0, 'ACTIVE', DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 40 DAY));
+
+INSERT INTO ALERT_PREFERENCE (user_id, point_change_enabled, order_summary_enabled, drop_alert_enabled) VALUES
+(910025, TRUE, TRUE, TRUE), (910034, TRUE, TRUE, TRUE), (910035, TRUE, TRUE, TRUE);
+
+INSERT INTO DRIVER_APPLICATION
+(application_id, driver_id, sponsor_id, decided_by_user_id, submitted_at, status, decision_at, reason,
+ cdl_number, cdl_state, years_experience, applicant_notes) VALUES
+(910009, 910025, 900001, 900002, DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 41 DAY), 'APPROVED', DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 40 DAY),
+ 'Strong safety record', 'SC3141592', 'SC', 7, NULL),
+(910010, 910034, 900001, NULL, DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 2 DAY), 'PENDING', NULL, NULL,
+ 'SC2718281', 'SC', 9, 'Nine years of regional reefer loads, no accidents.'),
+(910011, 910035, 900001, NULL, DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 1 DAY), 'PENDING', NULL, NULL,
+ 'GA1618033', 'GA', 0, 'Just finished CDL school.');
+
+-- Tiger's catalog: the four demo products, priced from Tiger's own point value (whatever it is on RDS).
+INSERT IGNORE INTO CATALOG_ITEM (sponsor_id, product_id, point_price, is_active)
+SELECT 900001, p.product_id, CEIL(p.dollar_price / s.point_dollar_rate), TRUE
+  FROM PRODUCT p JOIN SPONSOR_ORGANIZATION s ON s.sponsor_id = 900001
+ WHERE p.product_id IN (910001, 910002, 910003, 910004);
+
+SET @mug_points := (SELECT point_price FROM CATALOG_ITEM WHERE sponsor_id = 900001 AND product_id = 910002);
+SET @card_points := (SELECT point_price FROM CATALOG_ITEM WHERE sponsor_id = 900001 AND product_id = 910003);
+
+-- Lucas Bennett (910025): awards, a deduction, a delivered order. Ends at 3,850 minus the gift card price (1,850 at $0.01).
+INSERT INTO POINT_TRANSACTION (driver_id, sponsor_id, performed_by_user_id, points_delta, balance_after, reason, created_at) VALUES
+(910025, 900001, 900002,  3000, 3000, 'Welcome bonus',                      DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 40 DAY)),
+(910025, 900001, 910015,  1000, 4000, 'Perfect pre-trip inspections',       DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 21 DAY)),
+(910025, 900001, 900002,  -150, 3850, 'Missed check-in call',               DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 15 DAY));
+INSERT INTO CUSTOMER_ORDER (order_id, driver_id, sponsor_id, placed_by_user_id, status, total_points, total_dollar_amount, placed_at)
+VALUES (910005, 910025, 900001, 910025, 'DELIVERED', @card_points, 20.00, DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 10 DAY));
+INSERT INTO ORDER_ITEM (order_id, line_number, sponsor_id, product_id, quantity, unit_point_price, unit_dollar_price)
+VALUES (910005, 1, 900001, 910003, 1, @card_points, 20.00);
+INSERT INTO POINT_TRANSACTION (driver_id, sponsor_id, performed_by_user_id, points_delta, balance_after, reason, created_at)
+VALUES (910025, 900001, 910025, -@card_points, 3850 - @card_points, 'Catalog purchase, order #910005', DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 10 DAY));
+UPDATE DRIVER_SPONSOR SET current_points = 3850 - @card_points WHERE driver_id = 910025 AND sponsor_id = 900001;
+UPDATE DRIVER SET current_points = 3850 - @card_points WHERE driver_id = 910025;
+
+-- testdriver (900003): two awards and a shipped order, added on top of whatever balance they have now. Dated after
+-- their newest existing transaction so the point history reads in order.
+SET @td_base := (SELECT COALESCE(MAX(created_at), DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 30 DAY)) FROM POINT_TRANSACTION
+                  WHERE driver_id = 900003 AND sponsor_id = 900001);
+SET @td1 := GREATEST(DATE_ADD(@td_base, INTERVAL 1 MINUTE), DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 18 DAY));
+SET @td2 := GREATEST(DATE_ADD(@td1, INTERVAL 1 MINUTE), DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 9 DAY));
+SET @td3 := GREATEST(DATE_ADD(@td2, INTERVAL 1 MINUTE), DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 5 DAY));
+UPDATE DRIVER_SPONSOR SET current_points = current_points + 2500 WHERE driver_id = 900003 AND sponsor_id = 900001;
+INSERT INTO POINT_TRANSACTION (driver_id, sponsor_id, performed_by_user_id, points_delta, balance_after, reason, created_at)
+SELECT 900003, 900001, 900002, 2500, current_points, 'Quarterly safe-driving bonus', @td1
+  FROM DRIVER_SPONSOR WHERE driver_id = 900003 AND sponsor_id = 900001;
+UPDATE DRIVER_SPONSOR SET current_points = current_points + 750 WHERE driver_id = 900003 AND sponsor_id = 900001;
+INSERT INTO POINT_TRANSACTION (driver_id, sponsor_id, performed_by_user_id, points_delta, balance_after, reason, created_at)
+SELECT 900003, 900001, 910015, 750, current_points, 'Zero idling violations this month', @td2
+  FROM DRIVER_SPONSOR WHERE driver_id = 900003 AND sponsor_id = 900001;
+UPDATE DRIVER_SPONSOR SET current_points = current_points - @mug_points WHERE driver_id = 900003 AND sponsor_id = 900001;
+INSERT INTO CUSTOMER_ORDER (order_id, driver_id, sponsor_id, placed_by_user_id, status, total_points, total_dollar_amount, placed_at)
+VALUES (910006, 900003, 900001, 900003, 'SHIPPED', @mug_points, 15.00, @td3);
+INSERT INTO ORDER_ITEM (order_id, line_number, sponsor_id, product_id, quantity, unit_point_price, unit_dollar_price)
+VALUES (910006, 1, 900001, 910002, 1, @mug_points, 15.00);
+INSERT INTO POINT_TRANSACTION (driver_id, sponsor_id, performed_by_user_id, points_delta, balance_after, reason, created_at)
+SELECT 900003, 900001, 900003, -@mug_points, current_points, 'Catalog purchase, order #910006', @td3
+  FROM DRIVER_SPONSOR WHERE driver_id = 900003 AND sponsor_id = 900001;
+
+INSERT INTO RECURRING_POINT_SCHEDULE
+(driver_id, sponsor_id, created_by_user_id, points_amount, reason, frequency, next_run_at, is_active) VALUES
+(910025, 900001, 910015, 300, 'Weekly on-time delivery bonus', 'WEEKLY', DATE_ADD(CURRENT_TIMESTAMP, INTERVAL 2 DAY), TRUE);
+
+INSERT INTO NOTIFICATION (user_id, notification_type, message, is_read, created_at) VALUES
+(900003, 'POINT_CHANGE', '2,500 points were added by Tiger Test Trucking: Quarterly safe-driving bonus.', FALSE, @td1),
+(900003, 'POINT_CHANGE', '750 points were added by Tiger Test Trucking: Zero idling violations this month.', FALSE, @td2),
+(900003, 'ORDER',        'Order #910006 has shipped: Insulated Travel Mug, 20 oz.', FALSE, @td3),
+(910025, 'ORDER',        'Order #910005 was delivered: Truck Stop Gift Card, $20.', TRUE, DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 7 DAY));
+
+INSERT INTO AUDIT_EVENT (actor_user_id, sponsor_id, driver_id, category, subject_username, entity_type, entity_id,
+                         success, reason_or_details, created_at) VALUES
+(900002, 900001, 910025, 'APPLICATION',  'tigerdriver2', 'DRIVER_APPLICATION', 910009, TRUE, 'Application approved: Strong safety record', DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 40 DAY)),
+(900002, 900001, 900003, 'POINT_CHANGE', 'testdriver',   'POINT_TRANSACTION',  NULL,   TRUE, 'Quarterly safe-driving bonus (+2500)',       @td1),
+(910015, 900001, 900003, 'POINT_CHANGE', 'testdriver',   'POINT_TRANSACTION',  NULL,   TRUE, 'Zero idling violations this month (+750)',   @td2);
