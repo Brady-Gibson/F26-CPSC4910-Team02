@@ -4,14 +4,19 @@
     POST /api/admin/users                        create a driver, sponsor user, or admin account
     POST /api/admin/users/<id>/status            lock, unlock, deactivate, or reactivate an account
     POST /api/admin/users/<id>/reset-password    set a new password (also unlocks a locked account)
+    PATCH /api/admin/users/<id>                  edit name, email, phone (and job title for sponsor users)
+    GET  /api/admin/sponsors                     every sponsor company with driver / user / points counts
     POST /api/admin/sponsors                     create a sponsor company (Add sponsor on admin/sponsors.html)
+    PATCH /api/admin/sponsors/<id>               edit name, contact, point value, or status (ACTIVE / INACTIVE)
 """
 from decimal import Decimal, InvalidOperation
 
 from flask import Blueprint, g, jsonify, request
 from werkzeug.security import generate_password_hash
 
-from accounts import EMAIL_RE, ROLES, AccountError, check_password, create_user
+import mysql.connector
+
+from accounts import EMAIL_RE, ROLES, AccountError, check_password, clean_profile, create_user
 from audit import log_audit, notify
 from auth import PASSWORD_RESET, REACTIVATED, UNLOCKED, require_role
 from db import query, transaction
@@ -28,7 +33,7 @@ def users():
                   CASE WHEN a.admin_id IS NOT NULL THEN 'admin'
                        WHEN su.sponsor_user_id IS NOT NULL THEN 'sponsor'
                        WHEN d.driver_id IS NOT NULL THEN 'driver' END AS role,
-                  su.sponsor_id AS sponsor_id, s.sponsor_name
+                  su.sponsor_id AS sponsor_id, s.sponsor_name, su.job_title
              FROM USER_ACCOUNT u
              LEFT JOIN ADMIN a ON a.admin_id = u.user_id
              LEFT JOIN SPONSOR_USER su ON su.sponsor_user_id = u.user_id
@@ -133,30 +138,147 @@ def reset_password(user_id):
     return jsonify(ok=True, account_status=status)
 
 
+PROFILE_KEYS = ("first_name", "last_name", "email", "phone")
+
+
+@bp.patch("/users/<int:user_id>")
+@require_role("admin")
+def edit_user(user_id):
+    """Body: {"first_name", "last_name", "email", "phone", "job_title" (sponsor users only)}. Username can't change."""
+    data = request.get_json(silent=True) or {}
+    try:
+        first_name, last_name, email, phone = clean_profile(*(data.get(k) for k in PROFILE_KEYS))
+    except AccountError as e:
+        return jsonify(error=str(e)), 400
+    job_title = str(data.get("job_title") or "").strip()
+    if len(job_title) > 100:
+        return jsonify(error="Job title must be 100 characters or fewer."), 400
+    with transaction() as cur:
+        cur.execute("SELECT user_id, username, first_name, last_name, email, phone FROM USER_ACCOUNT "
+                    "WHERE user_id = %s FOR UPDATE", (user_id,))
+        before = cur.fetchone()
+        if before is None:
+            return jsonify(error="User not found."), 404
+        cur.execute("SELECT 1 FROM USER_ACCOUNT WHERE LOWER(email) = %s AND user_id <> %s LIMIT 1", (email, user_id))
+        if cur.fetchone():
+            return jsonify(error="An account with that email already exists."), 400
+        after = dict(zip(PROFILE_KEYS, (first_name, last_name, email, phone)))
+        changed = [k for k in PROFILE_KEYS if before[k] != after[k]]
+        try:
+            cur.execute("UPDATE USER_ACCOUNT SET first_name = %s, last_name = %s, email = %s, phone = %s, "
+                        "updated_at = CURRENT_TIMESTAMP WHERE user_id = %s",
+                        (first_name, last_name, email, phone, user_id))
+        except mysql.connector.IntegrityError:
+            return jsonify(error="An account with that email already exists."), 400
+        cur.execute("SELECT job_title, sponsor_id FROM SPONSOR_USER WHERE sponsor_user_id = %s", (user_id,))
+        su = cur.fetchone()
+        if su and (su["job_title"] or "") != job_title:
+            cur.execute("UPDATE SPONSOR_USER SET job_title = %s WHERE sponsor_user_id = %s", (job_title or None, user_id))
+            changed.append("job_title")
+        if changed:
+            log_audit(cur, "ACCOUNT", True, actor_user_id=g.user["user_id"], subject_username=before["username"],
+                      sponsor_id=su["sponsor_id"] if su else None, entity_type="USER_ACCOUNT", entity_id=user_id,
+                      details="Edited by admin: " + ", ".join(k.replace("_", " ") for k in changed))
+    return jsonify(ok=True, changed=changed)
+
+
+def _sponsor_fields(data, partial=False):
+    """Validate sponsor company fields. Returns a dict of the fields present (all of them unless partial)."""
+    out = {}
+    if not partial or "sponsor_name" in data:
+        name = str(data.get("sponsor_name") or "").strip()
+        if not name:
+            raise AccountError("Sponsor name is required.")
+        if len(name) > 100:
+            raise AccountError("Sponsor name must be 100 characters or fewer.")
+        out["sponsor_name"] = name
+    if not partial or "contact_email" in data:
+        email = str(data.get("contact_email") or "").strip().lower()
+        if email and (len(email) > 100 or not EMAIL_RE.match(email)):
+            raise AccountError("Enter a valid contact email.")
+        out["contact_email"] = email or None
+    if not partial or "phone" in data:
+        phone = str(data.get("phone") or "").strip()
+        if len(phone) > 20:
+            raise AccountError("Phone must be 20 characters or fewer.")
+        out["phone"] = phone or None
+    if not partial or "point_dollar_rate" in data:
+        try:
+            rate = Decimal(str(data.get("point_dollar_rate") or "0.01").strip())
+        except InvalidOperation:
+            raise AccountError("Point value must be a dollar amount, like 0.01.") from None
+        # The column is DECIMAL(10,2), so anything finer than a cent would be silently rounded.
+        if not rate.is_finite() or not Decimal("0.01") <= rate <= Decimal("1000") or rate != rate.quantize(Decimal("0.01")):
+            raise AccountError("Point value must be between $0.01 and $1,000.00, in whole cents.")
+        out["point_dollar_rate"] = rate
+    if partial and "status" in data:
+        status = str(data.get("status") or "").strip().upper()
+        if status not in ("ACTIVE", "INACTIVE"):
+            raise AccountError("Status must be ACTIVE or INACTIVE.")
+        out["status"] = status
+    return out
+
+
+@bp.get("/sponsors")
+@require_role("admin")
+def sponsors():
+    """Read endpoint for admin/sponsors.html."""
+    rows = query("""SELECT s.sponsor_id, s.sponsor_name, s.status, s.point_dollar_rate, s.contact_email, s.phone,
+                           s.created_at,
+                           (SELECT COUNT(*) FROM DRIVER_SPONSOR m WHERE m.sponsor_id = s.sponsor_id
+                               AND m.participation_status = 'ACTIVE') AS drivers,
+                           (SELECT COUNT(*) FROM SPONSOR_USER su WHERE su.sponsor_id = s.sponsor_id) AS sponsor_users,
+                           (SELECT COALESCE(SUM(m.current_points), 0) FROM DRIVER_SPONSOR m
+                             WHERE m.sponsor_id = s.sponsor_id AND m.participation_status = 'ACTIVE') AS points_outstanding,
+                           (SELECT COUNT(*) FROM DRIVER_APPLICATION a WHERE a.sponsor_id = s.sponsor_id
+                               AND a.status = 'PENDING') AS pending_applications
+                      FROM SPONSOR_ORGANIZATION s ORDER BY s.sponsor_name""")
+    return jsonify(sponsors=rows)
+
+
+@bp.patch("/sponsors/<int:sponsor_id>")
+@require_role("admin")
+def edit_sponsor(sponsor_id):
+    """Body: any of sponsor_name, contact_email, phone, point_dollar_rate, status. Deactivating a sponsor hides it
+    from drivers (catalog, applications, sponsor switcher) without deleting any history."""
+    data = request.get_json(silent=True) or {}
+    try:
+        fields = _sponsor_fields(data, partial=True)
+    except AccountError as e:
+        return jsonify(error=str(e)), 400
+    if not fields:
+        return jsonify(error="Nothing to change."), 400
+    with transaction() as cur:
+        cur.execute("SELECT * FROM SPONSOR_ORGANIZATION WHERE sponsor_id = %s FOR UPDATE", (sponsor_id,))
+        before = cur.fetchone()
+        if before is None:
+            return jsonify(error="Sponsor not found."), 404
+        if "sponsor_name" in fields:
+            cur.execute("SELECT 1 FROM SPONSOR_ORGANIZATION WHERE LOWER(sponsor_name) = LOWER(%s) AND sponsor_id <> %s "
+                        "LIMIT 1", (fields["sponsor_name"], sponsor_id))
+            if cur.fetchone():
+                return jsonify(error="A sponsor with that name already exists."), 400
+        changed = {k: v for k, v in fields.items() if before[k] != v}
+        if changed:
+            # Column names come from _sponsor_fields (fixed strings), never from the request.
+            cur.execute("UPDATE SPONSOR_ORGANIZATION SET " + ", ".join(f"{k} = %s" for k in changed) +
+                        " WHERE sponsor_id = %s", (*changed.values(), sponsor_id))
+            log_audit(cur, "ORGANIZATION", True, actor_user_id=g.user["user_id"], sponsor_id=sponsor_id,
+                      subject_username=before["sponsor_name"][:100], entity_type="SPONSOR_ORGANIZATION",
+                      entity_id=sponsor_id,
+                      details="Edited by admin: " + ", ".join(f"{k.replace('_', ' ')} = {v}" for k, v in changed.items()))
+    return jsonify(ok=True, changed=list(changed))
+
+
 @bp.post("/sponsors")
 @require_role("admin")
 def create_sponsor():
     """Create a sponsor company. Its sponsor users are added separately."""
-    data = request.get_json(silent=True) or {}
-    name = str(data.get("sponsor_name") or "").strip()
-    email = str(data.get("contact_email") or "").strip().lower()
-    phone = str(data.get("phone") or "").strip()
-
-    if not name:
-        return jsonify(error="Sponsor name is required."), 400
-    if len(name) > 100:
-        return jsonify(error="Sponsor name must be 100 characters or fewer."), 400
-    if email and (len(email) > 100 or not EMAIL_RE.match(email)):
-        return jsonify(error="Enter a valid contact email."), 400
-    if len(phone) > 20:
-        return jsonify(error="Phone must be 20 characters or fewer."), 400
     try:
-        rate = Decimal(str(data.get("point_dollar_rate") or "0.01").strip())
-    except InvalidOperation:
-        return jsonify(error="Point value must be a dollar amount, like 0.01."), 400
-    # The column is DECIMAL(10,2), so anything finer than a cent would be silently rounded.
-    if not rate.is_finite() or not Decimal("0.01") <= rate <= Decimal("1000") or rate != rate.quantize(Decimal("0.01")):
-        return jsonify(error="Point value must be between $0.01 and $1,000.00, in whole cents."), 400
+        f = _sponsor_fields(request.get_json(silent=True) or {})
+    except AccountError as e:
+        return jsonify(error=str(e)), 400
+    name, rate, email, phone = f["sponsor_name"], f["point_dollar_rate"], f["contact_email"], f["phone"]
 
     with transaction() as cur:
         cur.execute("SELECT 1 FROM SPONSOR_ORGANIZATION WHERE LOWER(sponsor_name) = LOWER(%s) LIMIT 1", (name,))
@@ -165,7 +287,7 @@ def create_sponsor():
         cur.execute(
             """INSERT INTO SPONSOR_ORGANIZATION (sponsor_name, status, point_dollar_rate, contact_email, phone)
                VALUES (%s, 'ACTIVE', %s, %s, %s)""",
-            (name, rate, email or None, phone or None))
+            (name, rate, email, phone))
         sponsor_id = cur.lastrowid
         log_audit(cur, "ACCOUNT", True, actor_user_id=g.user["user_id"], sponsor_id=sponsor_id,
                   subject_username=name[:100], entity_type="SPONSOR_ORGANIZATION", entity_id=sponsor_id,

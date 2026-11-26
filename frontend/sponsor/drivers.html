@@ -39,7 +39,7 @@ VIEWS.sponsor.drivers = async () => {
   <div class="panel flush"><div class="tw"><table><thead><tr><th>Driver</th><th>Status</th><th>Joined</th><th class="num">Points</th><th class="num">Value</th><th></th></tr></thead><tbody>
   ${drivers.map(d=>`<tr data-row="${esc((d.first_name+" "+d.last_name+" "+d.username).toLowerCase())}"><td><b>${esc(d.first_name)} ${esc(d.last_name)}</b><br><span class="dim">${esc(d.username)}</span></td>
     <td>${badge(d.participation_status)}${d.account_status!=="ACTIVE"?" "+badge(d.account_status):""}</td><td>${fmtD(d.joined_at)}</td><td class="num"><b>${n(d.current_points)}</b></td><td class="num">${usd(d.current_points*s.point_dollar_rate)}</td>
-    <td class="num"><div class="row" style="justify-content:flex-end"><button class="btn ghost sm" data-view="${d.driver_id}">View</button>${d.participation_status==="ACTIVE"?`<button class="btn go sm" data-adj="${d.driver_id}">Adjust points</button><button class="btn danger sm" data-drop="${d.driver_id}">Drop</button>`:""}</div></td></tr>`).join("")
+    <td class="num"><div class="row" style="justify-content:flex-end"><button class="btn ghost sm" data-view="${d.driver_id}">View</button>${d.participation_status==="ACTIVE"?`${LIVE?`<button class="btn ghost sm" data-viewas="${d.driver_id}">View as</button>`:""}<button class="btn go sm" data-adj="${d.driver_id}">Adjust points</button><button class="btn danger sm" data-drop="${d.driver_id}">Drop</button>`:""}</div></td></tr>`).join("")
     || `<tr><td colspan="6" class="empty">No drivers yet. Approve an application to add one.</td></tr>`}
   </tbody></table></div></div>${src("driver","user_account","point_transaction","notification","audit_event")}`;
 };
@@ -149,6 +149,13 @@ bind.sponsor.drivers = () => {
   $("#dq").oninput=e=>document.querySelectorAll("[data-row]").forEach(r=>r.hidden=!r.dataset.row.includes(e.target.value.toLowerCase()));
   document.querySelectorAll("[data-adj]").forEach(b=>b.onclick=()=>{ const d=find(+b.dataset.adj); adjustDialog(d.driver_id, `${d.first_name} ${d.last_name}`); });
   document.querySelectorAll("[data-drop]").forEach(b=>b.onclick=()=>dropDriver(find(+b.dataset.drop)));
+  // View as driver: see the site the way this driver does (read only) until "Back to sponsor".
+  document.querySelectorAll("[data-viewas]").forEach(b=>b.onclick=async()=>{
+    b.disabled = true;
+    try { const d = await App.api("/api/view-as", { method: "POST", body: { user_id: +b.dataset.viewas } });
+          location.href = ROOT + HOME[d.user.role] + ".html"; }
+    catch (e) { toast(e.message); b.disabled = false; }
+  });
 };
 
 App.start("sponsor", "drivers");

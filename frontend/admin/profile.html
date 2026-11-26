@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Profile · TigerTruck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/app.css">
+</head>
+<body data-root="../">
+<div class="shell"><aside class="rail" id="rail"></aside><main id="main" tabindex="-1"><div class="loading">Loading…</div></main></div>
+<dialog id="dlg"><form method="dialog" class="dlg" id="dlgBody"></form></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="../assets/js/mock-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script>
+/* LIVE: GET /api/me/profile, POST /api/me/profile, POST /api/me/password (in changePasswordDialog) */
+
+const PROFILE_FIELDS = [["first_name","First name","text",50,true], ["last_name","Last name","text",50,true],
+                        ["email","Email","email",100,true], ["phone","Phone","tel",20,false]];
+
+VIEWS.admin.profile = async () => {
+  const { profile: u } = LIVE ? await App.api("/api/me/profile") : { profile: user(ME.admin) };
+  return `<div class="head"><div><h1>Profile</h1></div></div><div class="grid g2"><form class="panel" id="profileForm"><div class="grid" style="gap:12px">
+  ${PROFILE_FIELDS.map(([k,l,t,max,req])=>`<label class="field">${l}<input type="${t}" data-f="${k}" maxlength="${max}" value="${esc(u[k])}"${req?" required":` placeholder="optional"`}></label>`).join("")}
+  <p id="profileErr" role="alert" style="margin:0;color:var(--red)"></p>
+  <button class="btn go" id="saveP">Save changes</button></div></form>
+  <div class="panel"><h2>Account</h2><p>Username <b>${esc(u.username)}</b></p><p>Status ${badge(u.account_status)}</p><button class="btn ghost" id="changePw">Change password</button><p><a href="../security-questions.html">Set up security questions</a></p>${src("user_account","audit_event")}</div></div>`;
+};
+
+bind.admin.profile = () => {
+  $("#profileForm").onsubmit = async e => {
+    e.preventDefault();
+    const body = {}; document.querySelectorAll("[data-f]").forEach(i => body[i.dataset.f] = i.value.trim());
+    $("#saveP").disabled = true; $("#profileErr").textContent = "";
+    try {
+      if (LIVE) {
+        const { changed } = await App.api("/api/me/profile", { method: "POST", body });
+        Object.assign(App.me, { first_name: body.first_name, last_name: body.last_name, email: body.email.toLowerCase() });
+        toast(changed.length ? "Changes saved" : "Nothing to save");
+      } else { Object.assign(user(ME.admin), body, { updated_at: now() }); toast("Changes saved"); }
+      App.render();
+    } catch (err) { $("#profileErr").textContent = err.message; $("#saveP").disabled = false; }
+  };
+  $("#changePw").onclick = changePasswordDialog;
+};
+
+App.start("admin", "profile");
+</script>
+</body>
+</html>

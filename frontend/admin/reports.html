@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Sales reports · TigerTruck</title>
+<title>Reports · TigerTruck</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;700;800;900&display=swap" rel="stylesheet">
@@ -16,13 +16,65 @@
 <script src="../assets/js/mock-data.js"></script>
 <script src="../assets/js/app.js"></script>
 <script>
-VIEWS.admin.reports = () => { const live=DB.customer_order.filter(o=>o.status!=="CANCELLED");
-  const by=DB.sponsor_organization.map(s=>({s,os:live.filter(o=>o.sponsor_id===s.sponsor_id)})).map(x=>({...x,usd:x.os.reduce((a,o)=>a+o.total_dollar_amount,0)}));
-  const max=Math.max(1,...by.map(b=>b.usd));
-  return `<div class="head"><div><h1>Sales reports</h1><p class="sub">Dollar value of redemptions by sponsor, for invoicing. Cancelled orders are excluded.</p></div></div>
-  <div class="grid g3" style="margin-bottom:18px"><div class="panel"><div class="dim">Orders</div><div class="stat">${live.length}</div></div><div class="panel"><div class="dim">Sales</div><div class="stat">${usd(live.reduce((a,o)=>a+o.total_dollar_amount,0))}</div></div><div class="panel"><div class="dim">Points redeemed</div><div class="stat">${n(live.reduce((a,o)=>a+o.total_points,0))}</div></div></div>
-  <div class="panel">${by.map(b=>`<div style="margin-bottom:12px"><div class="row spread"><b>${esc(b.s.sponsor_name)}</b><span>${usd(b.usd)} · ${b.os.length} orders</span></div><div class="bar"><i style="width:${b.usd/max*100}%"></i></div></div>`).join("")}
-  ${src("customer_order","order_item","sponsor_organization")}</div>`; };
+/* LIVE: GET /api/admin/reports?report=&view=&sponsor_id=&driver_id=&start_date=&end_date=
+         GET /api/admin/reports/export.csv (same parameters)
+   Reports: sales by sponsor, sales by driver, invoice (fee tracking). The audit log report is on admin/audit.html. */
+
+const REPORT_INFO = {
+  sponsor_sales: "Dollar value of catalog redemptions, by sponsor. Cancelled orders are excluded.",
+  driver_sales: "What each driver redeemed, by sponsor. Detail lists every item bought.",
+  invoice: "What each sponsor owes the program: a fee on its redemption sales. Detail breaks it down by driver.",
+};
+let rq = { report: "sponsor_sales", view: "summary", sponsor_id: "", driver_id: "", start_date: "", end_date: "" };
+try { Object.assign(rq, JSON.parse(sessionStorage.getItem("tt_admin_report") || "{}")); } catch {}
+
+const params = () => new URLSearchParams(Object.entries(rq).filter(([, v]) => v !== ""));
+const cell = (key, v) => v === null || v === undefined ? "—"
+  : /dollar|^fee$|^dollars$/.test(key) ? usd(v)
+  : /points|^orders$|^items$|^drivers$|^quantity$/.test(key) ? n(v)
+  : key === "placed_at" ? fmtDT(v) : esc(v);
+const numeric = key => /dollar|fee$|dollars|points|orders|items|drivers|quantity/.test(key) && key !== "fee_rate";
+
+VIEWS.admin.reports = async () => {
+  if (!LIVE) return `<div class="head"><div><h1>Reports</h1></div></div><div class="panel empty">Reports need the live server.</div>`;
+  const r = await App.api(`/api/admin/reports?${params()}`);
+  const sel = (id, opts, cur) => `<select id="${id}">${opts.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(cur) ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
+  const t = r.totals || {};
+  return `<div class="head"><div><h1>Reports</h1><p class="sub">${esc(REPORT_INFO[r.report])}</p></div>
+    <div class="row"><a class="btn ghost" href="audit.html">Audit log report</a><button class="btn go" id="rDownload">Download CSV</button></div></div>
+  <div class="panel" style="margin-bottom:18px"><div class="row" style="flex-wrap:wrap;gap:12px;align-items:flex-end">
+    <label class="field">Report${sel("rReport", [["sponsor_sales","Sales by sponsor"],["driver_sales","Sales by driver"],["invoice","Invoice / fees"]], r.report)}</label>
+    <label class="field">View${sel("rView", [["summary","Summary"],["detail","Detail"]], r.view)}</label>
+    <label class="field">Sponsor${sel("rSponsor", [["","All sponsors"], ...r.sponsors.map(s => [s.sponsor_id, s.sponsor_name])], rq.sponsor_id)}</label>
+    ${r.report === "driver_sales" ? `<label class="field">Driver${sel("rDriver", [["","All drivers"], ...r.drivers.map(d => [d.driver_id, `${d.name} (${d.username})`])], rq.driver_id)}</label>` : ""}
+    <label class="field">From<input type="date" id="rStart" value="${esc(rq.start_date)}"></label>
+    <label class="field">To<input type="date" id="rEnd" value="${esc(rq.end_date)}"></label>
+    <button class="btn ghost" id="rClear">Clear filters</button></div></div>
+  <div class="grid g3" style="margin-bottom:18px">
+    <div class="panel"><div class="dim">Orders</div><div class="stat">${n(t.orders ?? r.rows.length)}</div></div>
+    <div class="panel"><div class="dim">Sales</div><div class="stat">${usd(t.total_dollar_amount ?? t.dollars ?? 0)}</div></div>
+    <div class="panel"><div class="dim">${r.report === "invoice" ? `Fees due (${(r.fee_rate * 100).toFixed(0)}%)` : "Points redeemed"}</div>
+      <div class="stat">${r.report === "invoice" ? usd(t.fee ?? 0) : n(t.total_points ?? t.points ?? 0)}</div></div></div>
+  <div class="panel flush"><div class="tw"><table><thead><tr>${r.columns.map(c => `<th class="${numeric(c.key) ? "num" : ""}">${esc(c.label)}</th>`).join("")}</tr></thead><tbody>
+    ${r.rows.map(row => `<tr>${r.columns.map(c => `<td class="${numeric(c.key) ? "num" : ""}">${cell(c.key, row[c.key])}</td>`).join("")}</tr>`).join("")
+      || `<tr><td colspan="${r.columns.length}" class="empty">No sales match these filters.</td></tr>`}
+    ${r.rows.length ? `<tr><td><b>Total</b></td>${r.columns.slice(1).map(c => `<td class="${numeric(c.key) ? "num" : ""}"><b>${c.key in t ? cell(c.key, t[c.key]) : ""}</b></td>`).join("")}</tr>` : ""}
+  </tbody></table></div></div>`;
+};
+
+bind.admin.reports = () => {
+  if (!LIVE) return;
+  const set = (k, v) => { rq[k] = v; if (k === "report" && v !== "driver_sales") rq.driver_id = "";
+    try { sessionStorage.setItem("tt_admin_report", JSON.stringify(rq)); } catch {} App.render(); };
+  $("#rReport").onchange = e => set("report", e.target.value);
+  $("#rView").onchange = e => set("view", e.target.value);
+  $("#rSponsor").onchange = e => set("sponsor_id", e.target.value);
+  if ($("#rDriver")) $("#rDriver").onchange = e => set("driver_id", e.target.value);
+  $("#rStart").onchange = e => set("start_date", e.target.value);
+  $("#rEnd").onchange = e => set("end_date", e.target.value);
+  $("#rClear").onclick = () => { Object.assign(rq, { sponsor_id: "", driver_id: "", start_date: "", end_date: "" }); set("view", "summary"); };
+  $("#rDownload").onclick = () => downloadFile(`/api/admin/reports/export.csv?${params()}`);
+};
 
 App.start("admin", "reports");
 </script>

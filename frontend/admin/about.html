@@ -16,7 +16,7 @@
 <script src="../assets/js/mock-data.js"></script>
 <script src="../assets/js/app.js"></script>
 <script>
-VIEWS.admin.about = () => { const r=DB.about_release[DB.about_release.length-1];
+VIEWS.admin.about = async () => { const r = LIVE ? await App.api("/api/about") : DB.about_release[DB.about_release.length-1];
   return `<div class="head"><div><h1>About</h1><p class="sub">Shown on the public about page.</p></div></div>
   <div class="panel" style="max-width:640px"><h2>${esc(r.product_name)}</h2><p>${esc(r.product_description)}</p>
   <p class="dim">Team ${String(r.team_number).padStart(2,"0")} · Version ${esc(r.version_number)} · released ${esc(r.release_date.slice(0,10))}</p>${src("about_release")}</div>`; };

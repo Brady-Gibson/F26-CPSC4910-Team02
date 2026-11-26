@@ -7,8 +7,9 @@ Protect any route with:
     def something():
         g.user["user_id"], g.user["role"], g.user["sponsor_id"]   # who is calling
 
-View as: an admin can view the site as a driver or sponsor user (POST /api/view-as, /api/view-as/stop).
-While viewing, g.user is that driver or sponsor, g.viewed_by is the real admin, and require_role
+View as: an admin can view the site as a driver or sponsor user, and a sponsor user can view it as one of
+their own active drivers (POST /api/view-as, /api/view-as/stop).
+While viewing, g.user is that driver or sponsor, g.viewed_by is the real admin or sponsor, and require_role
 blocks anything but GET, so viewing is read-only.
 """
 from functools import wraps
@@ -77,13 +78,13 @@ def public_user(u, viewed_by=None):
     if u["role"] == "driver":
         out["memberships"] = u["memberships"]
     if viewed_by:
-        out["viewed_by"] = {k: viewed_by[k] for k in ("user_id", "first_name", "last_name")}
+        out["viewed_by"] = {k: viewed_by[k] for k in ("user_id", "first_name", "last_name", "role")}
     return out
 
 
 def current_user():
     """The signed-in user, re-checked against the DB so locked accounts lose access right away.
-    While an admin is viewing as someone, this returns that someone and sets g.viewed_by to the admin."""
+    While an admin (or sponsor) is viewing as someone, this returns that someone and sets g.viewed_by to the viewer."""
     if "user" in g:
         return g.user
     uid = session.get("user_id")
@@ -96,14 +97,25 @@ def current_user():
     g.viewed_by = None
     target_id = session.get("view_as")
     if target_id is not None:
-        target = load_user(target_id) if u["role"] == "admin" else None
-        if target is None or target["role"] not in VIEW_AS_ROLES:
+        target = load_user(target_id) if u["role"] in ("admin", "sponsor") else None
+        if target is None or not _may_view_as(u, target):
             session.pop("view_as", None)
         else:
             g.viewed_by, u = u, target
     driver_context(u)
     g.user = u
     return u
+
+
+def _may_view_as(viewer, target):
+    """Admins may view as any driver or sponsor user; a sponsor user only as a driver active in their organization."""
+    if viewer["role"] == "admin":
+        return target["role"] in VIEW_AS_ROLES
+    if viewer["role"] == "sponsor" and target["role"] == "driver":
+        return query("""SELECT 1 FROM DRIVER_SPONSOR WHERE driver_id = %s AND sponsor_id = %s
+                          AND participation_status = 'ACTIVE'""",
+                     (target["user_id"], viewer["sponsor_id"]), one=True) is not None
+    return False
 
 
 def require_role(*roles):
@@ -333,12 +345,13 @@ def change_password():
 
 @bp.post("/view-as")
 def start_view_as():
-    """Admin only: see the site as a driver or sponsor user. Body: {"user_id": ...}."""
+    """Admin: see the site as a driver or sponsor user. Sponsor user: see it as one of their active drivers.
+    Body: {"user_id": ...}."""
     u = current_user()
     if u is None:
         return jsonify(error="Please sign in."), 401
-    admin = g.viewed_by or u
-    if admin["role"] != "admin":
+    admin = g.viewed_by or u   # the real signed-in viewer (admin or sponsor user)
+    if admin["role"] not in ("admin", "sponsor"):
         return jsonify(error="You don't have access to that."), 403
     try:
         target_id = int((request.get_json(silent=True) or {}).get("user_id"))
@@ -347,15 +360,20 @@ def start_view_as():
     target = load_user(target_id)
     if target is None:
         return jsonify(error="User not found."), 404
-    if target["role"] not in VIEW_AS_ROLES:
+    if not _may_view_as(admin, target):
+        if admin["role"] == "sponsor":
+            return jsonify(error="You can only view as an active driver in your organization."), 400
         return jsonify(error="You can only view as a driver or sponsor user."), 400
 
     with transaction() as cur:
-        log_audit(cur, "VIEW_AS", True, actor_user_id=admin["user_id"], sponsor_id=target["sponsor_id"],
+        log_audit(cur, "VIEW_AS", True, actor_user_id=admin["user_id"],
+                  sponsor_id=admin["sponsor_id"] if admin["role"] == "sponsor" else target["sponsor_id"],
                   driver_id=target["user_id"] if target["role"] == "driver" else None,
                   subject_username=target["username"], entity_type="USER_ACCOUNT", entity_id=target["user_id"],
                   details=f"Started viewing as {target['role']} {target['username']}")
     session["view_as"] = target["user_id"]
+    if admin["role"] == "sponsor":   # show the driver's view of this sponsor, not whichever sponsor they last picked
+        session["selected_sponsor_" + str(target["user_id"])] = admin["sponsor_id"]
     return jsonify(ok=True, user=public_user(target, admin))
 
 

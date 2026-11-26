@@ -19,6 +19,7 @@ Recurring points (sponsor/schedules.html)
     GET  /api/sponsor/schedules                       schedules + active drivers for the form
     POST /api/sponsor/schedules                       {"driver_id", "points_amount", "frequency", "reason"}
     POST /api/sponsor/schedules/<id>/active           {"is_active": true|false}
+    POST /api/sponsor/schedules/<id>/run              award it now (the automatic job is scheduler.py)
 
 Catalog (sponsor/catalog.html)
     GET  /api/sponsor/catalog                         my catalog + non-eBay feed products, with point price / in-catalog flag
@@ -38,6 +39,11 @@ Organization (sponsor/organization.html)
     GET   /api/sponsor/organization                   my company + my sponsor team
     PATCH /api/sponsor/organization                   {"point_dollar_rate", "contact_email", "phone"}
     POST  /api/sponsor/organization/users             add a sponsor user to my organization (Invite sponsor user)
+    PATCH /api/sponsor/organization/users/<id>        edit a teammate's name, email, phone, job title
+    POST  /api/sponsor/organization/users/<id>/status {"status": "INACTIVE"|"ACTIVE"} remove / restore a teammate
+
+Report downloads (sponsor/reports.html)
+    GET  /api/sponsor/reports/export.csv?report=points|sales&driver_id=&start_date=&end_date=
 """
 from decimal import Decimal, InvalidOperation
 
@@ -50,6 +56,7 @@ from audit import log_audit, notify
 from auth import require_role
 from db import query, transaction
 from points import PointsError, change_points
+from reports import csv_response, date_range, optional_id
 
 bp = Blueprint("sponsor", __name__, url_prefix="/api/sponsor")
 
@@ -444,6 +451,29 @@ def set_schedule_active(schedule_id):
     return jsonify(ok=True, is_active=is_active)
 
 
+@bp.post("/schedules/<int:schedule_id>/run")
+@require_role("sponsor")
+def run_schedule_now(schedule_id):
+    """Award an active schedule's points right now (same path the automatic job uses) and push the next run forward
+    one period from now."""
+    import scheduler
+    sid = g.user["sponsor_id"]
+    with transaction() as cur:
+        cur.execute("SELECT * FROM RECURRING_POINT_SCHEDULE WHERE schedule_id = %s AND sponsor_id = %s FOR UPDATE",
+                    (schedule_id, sid))
+        s = cur.fetchone()
+        if s is None:
+            return jsonify(error="Schedule not found."), 404
+        if not s["is_active"]:
+            return jsonify(error="Resume this schedule before awarding it."), 409
+        cur.execute("UPDATE RECURRING_POINT_SCHEDULE SET next_run_at = CURRENT_TIMESTAMP WHERE schedule_id = %s",
+                    (schedule_id,))
+        s["next_run_at"] = None
+        if not scheduler.run_schedule(cur, s):
+            return jsonify(error="Couldn't award this schedule, so it was paused. Check the driver is still active."), 409
+    return jsonify(ok=True)
+
+
 # ---------------------------------------------------------------- Catalog
 
 @bp.get("/catalog")
@@ -704,8 +734,12 @@ def reports():
             ORDER BY pt.created_at DESC, pt.point_transaction_id DESC
             LIMIT 8""",
         (sid, PURCHASE_REASON))
+    drivers = query(
+        """SELECT d.driver_id, CONCAT(u.first_name, ' ', u.last_name) AS driver_name
+             FROM DRIVER_SPONSOR d JOIN USER_ACCOUNT u ON u.user_id = d.driver_id
+            WHERE d.sponsor_id = %s ORDER BY u.first_name, u.last_name""", (sid,))
     return jsonify(awarded=totals["awarded"], deducted=totals["deducted"], redeemed=redeemed["redeemed"],
-                   per_driver=per_driver, recent=recent)
+                   per_driver=per_driver, recent=recent, drivers=drivers)
 
 
 # ---------------------------------------------------------------- Organization
@@ -719,7 +753,8 @@ def organization():
              FROM SPONSOR_ORGANIZATION WHERE sponsor_id = %s""",
         (sid,), one=True)
     team = query(
-        """SELECT su.sponsor_user_id, su.job_title, u.first_name, u.last_name, u.email, u.account_status
+        """SELECT su.sponsor_user_id, su.job_title, u.username, u.first_name, u.last_name, u.email, u.phone,
+                  u.account_status
              FROM SPONSOR_USER su JOIN USER_ACCOUNT u ON u.user_id = su.sponsor_user_id
             WHERE su.sponsor_id = %s
             ORDER BY u.last_name, u.first_name""",
@@ -770,3 +805,124 @@ def create_sponsor_user():
     except AccountError as e:
         return jsonify(error=str(e)), 400
     return jsonify(ok=True, sponsor_user_id=user_id), 201
+
+
+def _my_team_member(cur, user_id):
+    """A sponsor user in MY organization (locked for update), else None."""
+    cur.execute("""SELECT su.sponsor_user_id, su.job_title, u.username, u.first_name, u.last_name, u.email, u.phone,
+                          u.account_status
+                     FROM SPONSOR_USER su JOIN USER_ACCOUNT u ON u.user_id = su.sponsor_user_id
+                    WHERE su.sponsor_user_id = %s AND su.sponsor_id = %s FOR UPDATE""",
+                (user_id, g.user["sponsor_id"]))
+    return cur.fetchone()
+
+
+@bp.patch("/organization/users/<int:user_id>")
+@require_role("sponsor")
+def edit_sponsor_user(user_id):
+    """Edit a teammate: {"first_name", "last_name", "email", "phone", "job_title"}."""
+    data = request.get_json(silent=True) or {}
+    try:
+        first_name, last_name, email, phone = clean_profile(
+            data.get("first_name"), data.get("last_name"), data.get("email"), data.get("phone"))
+    except AccountError as e:
+        return jsonify(error=str(e)), 400
+    job_title = str(data.get("job_title") or "").strip()
+    if len(job_title) > 100:
+        return jsonify(error="Job title must be 100 characters or fewer."), 400
+    with transaction() as cur:
+        member = _my_team_member(cur, user_id)
+        if member is None:
+            return jsonify(error="That user isn't on your team."), 404
+        cur.execute("SELECT 1 FROM USER_ACCOUNT WHERE LOWER(email) = %s AND user_id <> %s LIMIT 1", (email, user_id))
+        if cur.fetchone():
+            return jsonify(error="An account with that email already exists."), 400
+        try:
+            cur.execute("UPDATE USER_ACCOUNT SET first_name = %s, last_name = %s, email = %s, phone = %s, "
+                        "updated_at = CURRENT_TIMESTAMP WHERE user_id = %s",
+                        (first_name, last_name, email, phone, user_id))
+        except mysql.connector.IntegrityError:
+            return jsonify(error="An account with that email already exists."), 400
+        cur.execute("UPDATE SPONSOR_USER SET job_title = %s WHERE sponsor_user_id = %s", (job_title or None, user_id))
+        log_audit(cur, "ACCOUNT", True, actor_user_id=g.user["user_id"], sponsor_id=g.user["sponsor_id"],
+                  subject_username=member["username"], entity_type="USER_ACCOUNT", entity_id=user_id,
+                  details="Sponsor user edited by teammate")
+    return jsonify(ok=True)
+
+
+@bp.post("/organization/users/<int:user_id>/status")
+@require_role("sponsor")
+def set_sponsor_user_status(user_id):
+    """Remove (INACTIVE) or restore (ACTIVE) a teammate. Accounts are never deleted, so history stays intact.
+    You can't remove yourself."""
+    status = str((request.get_json(silent=True) or {}).get("status") or "").strip().upper()
+    if status not in ("ACTIVE", "INACTIVE"):
+        return jsonify(error="Status must be ACTIVE or INACTIVE."), 400
+    if user_id == g.user["user_id"]:
+        return jsonify(error="You can't remove your own account."), 400
+    with transaction() as cur:
+        member = _my_team_member(cur, user_id)
+        if member is None:
+            return jsonify(error="That user isn't on your team."), 404
+        if member["account_status"] == status:
+            return jsonify(error=f"That account is already {status.lower()}."), 400
+        if member["account_status"] == "LOCKED" and status == "ACTIVE":
+            return jsonify(error="That account is locked. Ask an admin to unlock it."), 400
+        cur.execute("UPDATE USER_ACCOUNT SET account_status = %s WHERE user_id = %s", (status, user_id))
+        log_audit(cur, "ACCOUNT", True, actor_user_id=g.user["user_id"], sponsor_id=g.user["sponsor_id"],
+                  subject_username=member["username"], entity_type="USER_ACCOUNT", entity_id=user_id,
+                  details="Removed from sponsor team" if status == "INACTIVE" else "Restored to sponsor team")
+    return jsonify(ok=True, account_status=status)
+
+
+# ---------------------------------------------------------------- Report downloads (CSV)
+
+SPONSOR_REPORTS = {
+    # Driver point tracking: every award/deduction (purchases and refunds excluded), newest first.
+    "points": ("driver-points", [("created_at", "Date"), ("driver_name", "Driver"), ("username", "Username"),
+                                 ("points_delta", "Points"), ("balance_after", "Balance after"),
+                                 ("reason", "Reason"), ("by_name", "Changed by")]),
+    # Driver purchases: every catalog order placed with my organization.
+    "sales": ("driver-purchases", [("placed_at", "Date"), ("order_id", "Order #"), ("driver_name", "Driver"),
+                                   ("status", "Status"), ("items", "Items"), ("total_points", "Points"),
+                                   ("total_dollar_amount", "Value ($)")]),
+}
+
+
+@bp.get("/reports/export.csv")
+@require_role("sponsor")
+def export_report():
+    """?report=points|sales&driver_id=&start_date=&end_date=  Download one of my reports as CSV."""
+    name = request.args.get("report", "points")
+    if name not in SPONSOR_REPORTS:
+        return jsonify(error="Pick a report."), 400
+    sid = g.user["sponsor_id"]
+    try:
+        driver_id = optional_id("driver_id")
+        where, params = date_range("pt.created_at" if name == "points" else "o.placed_at")
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    driver_clause = ""
+    if driver_id:
+        driver_clause = " AND pt.driver_id = %s" if name == "points" else " AND o.driver_id = %s"
+        params.append(driver_id)
+    if name == "points":
+        sql = f"""SELECT pt.created_at, CONCAT(du.first_name, ' ', du.last_name) AS driver_name, du.username,
+                         pt.points_delta, pt.balance_after, pt.reason,
+                         COALESCE(CONCAT(bu.first_name, ' ', bu.last_name), 'System') AS by_name
+                    FROM POINT_TRANSACTION pt
+                    JOIN USER_ACCOUNT du ON du.user_id = pt.driver_id
+                    LEFT JOIN USER_ACCOUNT bu ON bu.user_id = pt.performed_by_user_id
+                   WHERE pt.sponsor_id = %s AND LOWER(pt.reason) NOT REGEXP %s AND {where}{driver_clause}
+                   ORDER BY pt.created_at DESC, pt.point_transaction_id DESC"""
+        args = [sid, PURCHASE_REASON, *params]
+    else:
+        sql = f"""SELECT o.placed_at, o.order_id, CONCAT(u.first_name, ' ', u.last_name) AS driver_name, o.status,
+                         (SELECT COALESCE(SUM(i.quantity), 0) FROM ORDER_ITEM i WHERE i.order_id = o.order_id) AS items,
+                         o.total_points, o.total_dollar_amount
+                    FROM CUSTOMER_ORDER o JOIN USER_ACCOUNT u ON u.user_id = o.driver_id
+                   WHERE o.sponsor_id = %s AND {where}{driver_clause}
+                   ORDER BY o.placed_at DESC, o.order_id DESC"""
+        args = [sid, *params]
+    filename, cols = SPONSOR_REPORTS[name]
+    return csv_response(filename, cols, query(sql, args))

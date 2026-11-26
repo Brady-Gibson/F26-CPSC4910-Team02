@@ -19,7 +19,7 @@ const ME = {};
 const VIEWS = { driver:{}, sponsor:{}, admin:{} };
 const bind = { driver:{}, sponsor:{}, admin:{} };
 const HOME = { driver:"driver/dashboard", sponsor:"sponsor/drivers", admin:"admin/users" };
-const ROUTES = {"driver": [["dashboard", "Dashboard"], ["catalog", "Catalog"], ["cart", "Cart"], ["orders", "Orders"], ["points", "Point history"], ["sponsor", "My sponsors"], ["notifications", "Notifications"], ["profile", "Profile"]], "sponsor": [["drivers", "Drivers"], ["applications", "Applications"], ["schedules", "Recurring points"], ["catalog", "Catalog"], ["orders", "Orders"], ["reports", "Reports"], ["organization", "Organization"], ["bulk-import", "Bulk import"]], "admin": [["users", "Users"], ["sponsors", "Sponsors"], ["audit", "Audit log"], ["reports", "Sales reports"], ["about", "About"], ["bulk-import", "Bulk import"]]};
+const ROUTES = {"driver": [["dashboard", "Dashboard"], ["catalog", "Catalog"], ["cart", "Cart"], ["orders", "Orders"], ["points", "Point history"], ["sponsor", "My sponsors"], ["notifications", "Notifications"], ["profile", "Profile"]], "sponsor": [["drivers", "Drivers"], ["applications", "Applications"], ["schedules", "Recurring points"], ["catalog", "Catalog"], ["orders", "Orders"], ["reports", "Reports"], ["organization", "Organization"], ["bulk-import", "Bulk import"], ["profile", "Profile"]], "admin": [["users", "Users"], ["sponsors", "Sponsors"], ["reports", "Reports"], ["audit", "Audit log"], ["bulk-import", "Bulk import"], ["about", "About"], ["profile", "Profile"]]};
 
 const store = {
   get(k){ try { return JSON.parse(sessionStorage.getItem(k)); } catch { return null; } },
@@ -49,6 +49,18 @@ const driver = id => DB.driver.find(d=>d.driver_id===id);
 const badge = s => `<span class="badge b-${esc(s)}">${esc(String(s).replace(/_/g," ").toLowerCase())}</span>`;
 const src = (...t) => `<div class="src">Reads/writes: ${t.map(x=>`<code>${x.toUpperCase()}</code>`).join(" ")}</div>`;
 const roleOf = id => DB.admin.some(a=>a.admin_id===id) ? "Admin" : DB.sponsor_user.some(s=>s.sponsor_user_id===id) ? "Sponsor user" : "Driver";
+// Download a file from a GET endpoint (CSV/PDF reports). Shows the server's error message instead of saving it.
+async function downloadFile(path){
+  try {
+    const r = await fetch(path, { credentials: "same-origin" });
+    if (r.status === 401) { location.href = ROOT + "login.html"; return; }
+    if (!r.ok) { let m = "Download failed."; try { m = (await r.json()).error || m; } catch {} return toast(m); }
+    const name = /filename="([^"]+)"/.exec(r.headers.get("Content-Disposition") || "")?.[1] || "report.csv";
+    const url = URL.createObjectURL(await r.blob()), a = document.createElement("a");
+    a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch { toast("Can't reach the server right now."); }
+}
 function toast(m){ const t=$("#toast"); t.textContent=m; t.classList.add("on"); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("on"),2400); }
 
 function addPoints(did, sid, delta, reason, by){
@@ -305,7 +317,8 @@ function changePasswordDialog(){
 }
 
 async function stopViewAs(){
-  try { await App.api("/api/view-as/stop", { method: "POST" }); location.href = ROOT + HOME.admin + ".html"; }
+  const back = App.me?.viewed_by?.role || "admin";
+  try { await App.api("/api/view-as/stop", { method: "POST" }); location.href = ROOT + HOME[back] + ".html"; }
   catch (e) { toast(e.message); }
 }
 
@@ -327,7 +340,7 @@ function renderRail(){
       TigerTruck</a>
     <div class="who"><b>${esc(u.first_name)} ${esc(u.last_name)}</b>${esc(sub)}</div>
     ${App.me?.viewed_by ? `<div class="viewas" role="status"><b>Viewing as ${esc(u.first_name)} ${esc(u.last_name)}</b>Read only. Signed in as ${esc(App.me.viewed_by.first_name)} ${esc(App.me.viewed_by.last_name)}.
-      <button class="btn sm" id="stopViewAs">Back to admin</button></div>` : ""}
+      <button class="btn sm" id="stopViewAs">Back to ${App.me.viewed_by.role === "sponsor" ? "sponsor" : "admin"}</button></div>` : ""}
     ${LIVE && role === "driver" ? `<label class="field" style="margin:12px">Current sponsor
       <select id="selectedSponsor" ${App.me.viewed_by ? 'disabled' : ''}>
       ${!u.sponsor_id ? '<option value="">No active sponsor</option>' : ''}
@@ -339,9 +352,9 @@ function renderRail(){
     <div class="rail-foot">
       ${LIVE && role==="admin" ? `<button class="signout" id="viewAs">View as driver or sponsor</button>` : ""}
       <button class="signout" id="signOut">Sign out</button>
-      <label><input type="checkbox" id="srcToggle" ${document.body.classList.contains("show-src")?"checked":""}> Show data sources</label>
+      ${LIVE ? "" : `<label><input type="checkbox" id="srcToggle" ${document.body.classList.contains("show-src")?"checked":""}> Show data sources</label>`}
       <label><input type="checkbox" id="darkToggle" ${dark?"checked":""}> Dark theme</label>
-      <span>UI draft · data: <b>${esc(DATA_SOURCE)}</b></span>
+      ${LIVE ? "" : `<span>Sample data: <b>${esc(DATA_SOURCE)}</b></span>`}
       ${LIVE ? "" : `<button class="linkbtn" id="resetDemo">Reset demo data</button>`}
     </div>`;
   if ($("#selectedSponsor")) $("#selectedSponsor").onchange = async e => {
@@ -355,7 +368,7 @@ function renderRail(){
   if ($("#viewAs")) $("#viewAs").onclick = viewAsDialog;
   if ($("#stopViewAs")) $("#stopViewAs").onclick = stopViewAs;
   if ($("#resetDemo")) $("#resetDemo").onclick = App.resetDemo;
-  $("#srcToggle").onchange = e => { document.body.classList.toggle("show-src", e.target.checked); pref.set("tt_src", e.target.checked ? "1" : "0"); };
+  if ($("#srcToggle")) $("#srcToggle").onchange = e => { document.body.classList.toggle("show-src", e.target.checked); pref.set("tt_src", e.target.checked ? "1" : "0"); };
   $("#darkToggle").onchange = e => { const t = e.target.checked ? "dark" : "light"; document.documentElement.dataset.theme = t; pref.set("tt_theme", t); };
 }
 

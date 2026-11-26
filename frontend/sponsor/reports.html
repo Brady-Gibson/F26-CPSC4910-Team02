@@ -31,11 +31,27 @@ function mockReports(){
 VIEWS.sponsor.reports = async () => {
   const r = LIVE ? await App.api("/api/sponsor/reports") : mockReports();
   const max = Math.max(1, ...r.per_driver.map(p=>p.awarded));
-  return `<div class="head"><div><h1>Reports</h1><p class="sub">Point activity for your drivers. Export buttons come later.</p></div></div>
+  return `<div class="head"><div><h1>Reports</h1><p class="sub">Point activity and purchases for your drivers.</p></div></div>
+  ${LIVE ? `<div class="panel" style="margin-bottom:18px"><h2>Download a report</h2><div class="row" style="flex-wrap:wrap;gap:12px;align-items:flex-end">
+    <label class="field">Report<select id="rpKind"><option value="points">Driver point tracking</option><option value="sales">Driver purchases</option></select></label>
+    <label class="field">Driver<select id="rpDriver"><option value="">All drivers</option>${(r.drivers||[]).map(d=>`<option value="${d.driver_id}">${esc(d.driver_name)}</option>`).join("")}</select></label>
+    <label class="field">From<input type="date" id="rpStart"></label><label class="field">To<input type="date" id="rpEnd"></label>
+    <button class="btn go" id="rpDownload">Download CSV</button></div></div>` : ""}
   <div class="grid g3" style="margin-bottom:18px"><div class="panel"><div class="dim">Awarded</div><div class="stat plus">+${n(r.awarded)}</div></div><div class="panel"><div class="dim">Deducted</div><div class="stat minus">−${n(r.deducted)}</div></div>
   <div class="panel"><div class="dim">Redeemed</div><div class="stat">${n(r.redeemed)}</div></div></div>
   <div class="grid g2"><div class="panel"><h2>Awarded by driver</h2>${r.per_driver.map(p=>`<div style="margin-bottom:10px"><div class="row spread"><span>${esc(p.driver_name)}</span><span class="dim">+${n(p.awarded)} / −${n(p.deducted)}</span></div><div class="bar"><i style="width:${p.awarded/max*100}%"></i></div></div>`).join("") || `<p class="dim">No point activity yet.</p>`}</div>
   <div class="panel flush"><h2>Audit trail</h2>${txTable(r.recent,true)}</div></div>${src("point_transaction","customer_order")}`;
+};
+
+bind.sponsor.reports = () => {
+  if (!$("#rpDownload")) return;
+  $("#rpDownload").onclick = () => {
+    const q = new URLSearchParams({ report: $("#rpKind").value });
+    if ($("#rpDriver").value) q.set("driver_id", $("#rpDriver").value);
+    if ($("#rpStart").value) q.set("start_date", $("#rpStart").value);
+    if ($("#rpEnd").value) q.set("end_date", $("#rpEnd").value);
+    downloadFile(`/api/sponsor/reports/export.csv?${q}`);
+  };
 };
 
 App.start("sponsor", "reports");

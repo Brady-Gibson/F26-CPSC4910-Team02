@@ -17,7 +17,9 @@
 <script src="../assets/js/app.js"></script>
 <script>
 /* LIVE: GET /api/sponsor/organization, PATCH /api/sponsor/organization {point_dollar_rate, contact_email, phone}
-   Invite sponsor user: POST /api/sponsor/organization/users */
+   Invite sponsor user: POST /api/sponsor/organization/users
+   Edit teammate: PATCH /api/sponsor/organization/users/<id>; remove/restore: POST .../users/<id>/status */
+let teamRows = [];
 
 function mockOrganization(){
   const s = sponsor(mySponsor());
@@ -27,13 +29,19 @@ function mockOrganization(){
 
 VIEWS.sponsor.organization = async () => {
   const { organization: s, team } = LIVE ? await App.api("/api/sponsor/organization") : mockOrganization();
+  teamRows = team;
+  const me = App.me?.user_id ?? ME.sponsor;
+  const actions = t => !LIVE ? badge(t.account_status) : `<div class="row" style="flex-wrap:wrap;gap:6px;justify-content:flex-end;flex-shrink:0;max-width:60%">${badge(t.account_status)}${t.sponsor_user_id===me ? `<span class="dim">You</span>` : `
+    <button class="btn ghost sm" data-edit-su="${t.sponsor_user_id}">Edit</button>
+    ${t.account_status==="INACTIVE" ? `<button class="btn ghost sm" data-su-st="${t.sponsor_user_id}" data-to="ACTIVE">Restore</button>`
+      : t.account_status==="ACTIVE" ? `<button class="btn danger sm" data-su-st="${t.sponsor_user_id}" data-to="INACTIVE">Remove</button>` : ""}`}</div>`;
   return `<div class="head"><div><h1>${esc(s.sponsor_name)}</h1><p class="sub">Organization settings and your sponsor team.</p></div></div>
   <div class="grid g2"><div class="panel"><div class="grid" style="gap:12px">
     <label class="field">Dollar value of 1 point<input type="number" step="0.01" min="0.01" id="rate" value="${s.point_dollar_rate}"></label>
     <label class="field">Contact email<input type="email" id="ce" value="${esc(s.contact_email)}"></label>
     <label class="field">Phone<input type="tel" id="cp" value="${esc(s.phone)}"></label>
     <button class="btn go" id="saveO">Save changes</button></div>${src("sponsor_organization")}</div>
-  <div class="panel flush"><h2>Team</h2><div class="list">${team.map(t=>`<div class="li"><div><b>${esc(t.first_name)} ${esc(t.last_name)}</b><br><span class="dim">${t.job_title?esc(t.job_title)+" · ":""}${esc(t.email)}</span></div>${badge(t.account_status)}</div>`).join("")}</div>
+  <div class="panel flush"><h2>Team</h2><div class="list">${team.map(t=>`<div class="li"><div><b>${esc(t.first_name)} ${esc(t.last_name)}</b><br><span class="dim">${t.job_title?esc(t.job_title)+" · ":""}${esc(t.email)}</span></div>${actions(t)}</div>`).join("")}</div>
   <div style="padding:0 18px 16px"><button class="btn ghost" id="inviteUser">Invite sponsor user</button>${src("sponsor_user","user_account")}</div></div></div>`;
 };
 
@@ -101,7 +109,40 @@ function inviteDialog(){
   };
 }
 
-bind.sponsor.organization = () => { $("#saveO").onclick = saveOrganization; $("#inviteUser").onclick = inviteDialog; };
+function editTeammateDialog(t){
+  const f = (id, label, v, type="text", req=true) => `<label class="field">${label}<input type="${type}" id="${id}" value="${esc(v ?? "")}"${req?" required":""}></label>`;
+  $("#dlgBody").innerHTML = `<h2>Edit ${esc(t.first_name)} ${esc(t.last_name)}</h2>
+    <div class="grid g2" style="gap:12px">${f("et_first","First name",t.first_name)}${f("et_last","Last name",t.last_name)}</div>
+    ${f("et_email","Email",t.email,"email")}<div class="grid g2" style="gap:12px">${f("et_phone","Phone (optional)",t.phone,"tel",false)}${f("et_title","Job title (optional)",t.job_title,"text",false)}</div>
+    <p id="etErr" role="alert" style="margin:0;color:var(--red)"></p>
+    <div class="row" style="justify-content:flex-end"><button class="btn ghost" value="cancel" formnovalidate>Cancel</button><button class="btn go" value="ok">Save changes</button></div>`;
+  const form = $("#dlgBody"), dlg = $("#dlg");
+  dlg.onclose = null;
+  form.onsubmit = async e => {
+    if (e.submitter?.value !== "ok") return;
+    e.preventDefault(); e.submitter.disabled = true;
+    const body = { first_name: $("#et_first").value.trim(), last_name: $("#et_last").value.trim(), email: $("#et_email").value.trim(),
+                   phone: $("#et_phone").value.trim(), job_title: $("#et_title").value.trim() };
+    try { await App.api(`/api/sponsor/organization/users/${t.sponsor_user_id}`, { method: "PATCH", body });
+          form.onsubmit = null; dlg.close(); toast("Changes saved"); App.render(); }
+    catch (err) { $("#etErr").textContent = err.message; e.submitter.disabled = false; }
+  };
+  dlg.showModal();
+}
+
+async function setTeammateStatus(t, to){
+  if (to === "INACTIVE" && !confirm(`Remove ${t.first_name} ${t.last_name} from your team? They won't be able to sign in until restored.`)) return;
+  try { await App.api(`/api/sponsor/organization/users/${t.sponsor_user_id}/status`, { method: "POST", body: { status: to } });
+        toast(to === "INACTIVE" ? `${t.first_name} removed` : `${t.first_name} restored`); App.render(); }
+  catch (e) { toast(e.message); }
+}
+
+bind.sponsor.organization = () => {
+  $("#saveO").onclick = saveOrganization; $("#inviteUser").onclick = inviteDialog;
+  const find = id => teamRows.find(t => t.sponsor_user_id === id);
+  document.querySelectorAll("[data-edit-su]").forEach(b => b.onclick = () => editTeammateDialog(find(+b.dataset.editSu)));
+  document.querySelectorAll("[data-su-st]").forEach(b => b.onclick = () => setTeammateStatus(find(+b.dataset.suSt), b.dataset.to));
+};
 
 App.start("sponsor", "organization");
 </script>

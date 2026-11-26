@@ -75,10 +75,15 @@ from routes import driver, driver_commerce
 application.register_blueprint(driver.bp)
 from routes import sponsor
 application.register_blueprint(sponsor.bp)
-from routes import admin, admin_audit, bulk_import
+from routes import admin, admin_audit, admin_reports, bulk_import
 application.register_blueprint(admin.bp)
+application.register_blueprint(admin_reports.bp)
 application.register_blueprint(admin_audit.bp)
 application.register_blueprint(bulk_import.bp)
+
+# Awards recurring point schedules when they come due (every minute). Tests set RUN_SCHEDULER=0.
+import scheduler
+scheduler.start_background()
 
 
 @application.route("/")
