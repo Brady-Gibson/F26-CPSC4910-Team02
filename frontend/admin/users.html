@@ -17,7 +17,7 @@
 <script src="../assets/js/app.js"></script>
 <script>
 /* LIVE: GET /api/admin/users, POST /api/admin/users, POST /api/admin/users/<id>/status,
-         POST /api/admin/users/<id>/reset-password */
+         POST /api/admin/users/<id>/reset-password, PATCH /api/admin/users/<id> (Edit) */
 
 const ROLE_LABEL = { driver: "Driver", sponsor: "Sponsor user", admin: "Admin" };
 
@@ -43,7 +43,7 @@ VIEWS.admin.users = async () => {
     <td>${ROLE_LABEL[u.role] || "No role"}</td><td>${esc(u.sponsor_name || "—")}</td><td>${badge(u.account_status)}</td><td>${fmtD(u.created_at)}</td>
     <td class="num"><div class="row" style="justify-content:flex-end;flex-wrap:nowrap">
       ${LIVE && u.role === 'driver' ? `<button class="btn ghost sm" data-memberships="${u.user_id}">Sponsors</button>` : ''}${u.user_id===ME.admin ? `<span class="dim">You</span>` : `
-      <button class="btn ghost sm" data-reset="${u.user_id}">Reset password</button>
+      ${LIVE ? `<button class="btn ghost sm" data-edit="${u.user_id}">Edit</button>` : ""}<button class="btn ghost sm" data-reset="${u.user_id}">Reset password</button>
       ${u.account_status==="ACTIVE" ? `<button class="btn danger sm" data-st="${u.user_id}" data-to="LOCKED">Lock</button><button class="btn danger sm" data-st="${u.user_id}" data-to="INACTIVE">Deactivate</button>`
         : u.account_status==="LOCKED" ? `<button class="btn ghost sm" data-st="${u.user_id}" data-to="ACTIVE">Unlock</button><button class="btn danger sm" data-st="${u.user_id}" data-to="INACTIVE">Deactivate</button>`
         : `<button class="btn ghost sm" data-st="${u.user_id}" data-to="ACTIVE">Reactivate</button>`}`}</div></td></tr>`).join("")}
@@ -109,6 +109,20 @@ function createUserDialog(){
   $("#nuRole").onchange = sync; sync();
 }
 
+function editUserDialog(u){
+  const f = (id, label, v, type="text", req=true, max=50) => `<label class="field">${label}<input type="${type}" id="${id}" maxlength="${max}" value="${esc(v ?? "")}"${req?" required":` placeholder="optional"`}></label>`;
+  formDialog(`<h2 style="margin:0">Edit ${esc(u.username)}</h2>
+    <p class="dim" style="margin:0">${ROLE_LABEL[u.role] || "User"}${u.sponsor_name ? ` · ${esc(u.sponsor_name)}` : ""}. Usernames can't be changed.</p>
+    <div class="row" style="flex-wrap:nowrap"><div style="flex:1">${f("euFirst","First name",u.first_name)}</div><div style="flex:1">${f("euLast","Last name",u.last_name)}</div></div>
+    ${f("euEmail","Email",u.email,"email",true,100)}${f("euPhone","Phone",u.phone,"text",false,20)}
+    ${u.role === "sponsor" ? f("euJob","Job title",u.job_title,"text",false,100) : ""}${dlgButtons("Save changes")}`, async () => {
+    const body = { first_name: $("#euFirst").value.trim(), last_name: $("#euLast").value.trim(), email: $("#euEmail").value.trim(),
+                   phone: $("#euPhone").value.trim(), job_title: $("#euJob") ? $("#euJob").value.trim() : "" };
+    await App.api(`/api/admin/users/${u.user_id}`, { method: "PATCH", body });
+    toast(`${u.username} updated`);
+  });
+}
+
 function resetPasswordDialog(u){
   formDialog(`<h2 style="margin:0">Reset password</h2>
     <p class="dim" style="margin:0">Set a new password for <b>${esc(u.first_name)} ${esc(u.last_name)}</b> (${esc(u.username)}).
@@ -163,6 +177,7 @@ bind.admin.users = () => {
   $("#rf").onchange=f; $("#uq").oninput=f;
   $("#addUser").onclick = createUserDialog;
   document.querySelectorAll("[data-reset]").forEach(b=>b.onclick=()=>resetPasswordDialog(find(+b.dataset.reset)));
+  document.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>editUserDialog(find(+b.dataset.edit)));
   document.querySelectorAll("[data-st]").forEach(b=>b.onclick=()=>setStatus(find(+b.dataset.st), b.dataset.to));
 };
 

@@ -27,7 +27,7 @@ PASSWORD = "Password123!"
 # Point the app at the test database before application.py (and its .env) loads.
 os.environ.update(DB_HOST=os.environ["TEST_DB_HOST"], DB_USER=os.environ["TEST_DB_USER"],
                   DB_PASSWORD=os.environ["TEST_DB_PASSWORD"], DB_NAME=DB_NAME,
-                  DB_PORT=os.environ.get("TEST_DB_PORT", "3306"), SECRET_KEY="test-only",
+                  DB_PORT=os.environ.get("TEST_DB_PORT", "3306"), SECRET_KEY="test-only", RUN_SCHEDULER="0",
                   APP_ENV="development")
 
 

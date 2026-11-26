@@ -16,15 +16,65 @@
 <script src="../assets/js/mock-data.js"></script>
 <script src="../assets/js/app.js"></script>
 <script>
-VIEWS.admin.sponsors = () => `<div class="head"><div><h1>Sponsors</h1><p class="sub">Organizations using the program.</p></div><button class="btn go" id="addSponsor">Add sponsor</button></div>
-  <div class="panel flush"><div class="tw"><table><thead><tr><th>Sponsor</th><th>Status</th><th class="num">Drivers</th><th class="num">Sponsor users</th><th class="num">1 point</th><th class="num">Points outstanding</th><th></th></tr></thead><tbody>
-  ${DB.sponsor_organization.map(s=>{const ds=DB.driver.filter(d=>d.sponsor_id===s.sponsor_id&&d.participation_status==="ACTIVE");
-    return `<tr><td><b>${esc(s.sponsor_name)}</b><br><span class="dim">${esc(s.contact_email)}</span></td><td>${badge(s.status)}</td><td class="num">${ds.length}</td><td class="num">${DB.sponsor_user.filter(u=>u.sponsor_id===s.sponsor_id).length}</td><td class="num">${usd(s.point_dollar_rate)}</td>
-    <td class="num">${n(ds.reduce((a,d)=>a+d.current_points,0))}</td><td class="num"><button class="btn ghost sm" data-st="${s.sponsor_id}">${s.status==="ACTIVE"?"Deactivate":"Activate"}</button></td></tr>`;}).join("")}
-  </tbody></table></div></div>${src("sponsor_organization","driver","sponsor_user")}`;
+/* LIVE: GET /api/admin/sponsors, POST /api/admin/sponsors, PATCH /api/admin/sponsors/<id> (edit, activate, deactivate) */
+let sponsorRows = [];
+
+function mockSponsors(){
+  return { sponsors: DB.sponsor_organization.map(s => { const ds = DB.driver.filter(d=>d.sponsor_id===s.sponsor_id&&d.participation_status==="ACTIVE");
+    return { ...s, drivers: ds.length, sponsor_users: DB.sponsor_user.filter(u=>u.sponsor_id===s.sponsor_id).length,
+             points_outstanding: ds.reduce((a,d)=>a+d.current_points,0), pending_applications: 0 }; }) };
+}
+
+VIEWS.admin.sponsors = async () => {
+  ({ sponsors: sponsorRows } = LIVE ? await App.api("/api/admin/sponsors") : mockSponsors());
+  return `<div class="head"><div><h1>Sponsors</h1><p class="sub">Organizations using the program. Deactivating a sponsor hides it from drivers but keeps its history.</p></div><button class="btn go" id="addSponsor">Add sponsor</button></div>
+  <div class="panel flush"><div class="tw"><table><thead><tr><th>Sponsor</th><th>Status</th><th class="num">Drivers</th><th class="num">Sponsor users</th><th class="num">Pending apps</th><th class="num">1 point</th><th class="num">Points outstanding</th><th></th></tr></thead><tbody>
+  ${sponsorRows.map(s=>`<tr><td><b>${esc(s.sponsor_name)}</b><br><span class="dim">${esc(s.contact_email || "No contact email")}${s.phone ? " · " + esc(s.phone) : ""}</span></td><td>${badge(s.status)}</td>
+    <td class="num">${n(s.drivers)}</td><td class="num">${n(s.sponsor_users)}</td><td class="num">${n(s.pending_applications)}</td><td class="num">${usd(s.point_dollar_rate)}</td>
+    <td class="num">${n(s.points_outstanding)}</td><td class="num"><div class="row" style="justify-content:flex-end;flex-wrap:nowrap">
+      <button class="btn ghost sm" data-edit="${s.sponsor_id}">Edit</button>
+      <button class="btn ${s.status==="ACTIVE"?"danger":"ghost"} sm" data-st="${s.sponsor_id}">${s.status==="ACTIVE"?"Deactivate":"Activate"}</button></div></td></tr>`).join("")
+    || `<tr><td colspan="8" class="empty">No sponsors yet.</td></tr>`}
+  </tbody></table></div></div>${src("sponsor_organization","driver_sponsor","sponsor_user")}`;
+};
+
+async function setSponsorStatus(s){
+  const to = s.status === "ACTIVE" ? "INACTIVE" : "ACTIVE";
+  if (to === "INACTIVE" && !confirm(`Deactivate ${s.sponsor_name}? Its drivers won't see its catalog and new drivers can't apply until you activate it again.`)) return;
+  try {
+    if (LIVE) await App.api(`/api/admin/sponsors/${s.sponsor_id}`, { method: "PATCH", body: { status: to } });
+    else sponsor(s.sponsor_id).status = to;
+    toast(`${s.sponsor_name} ${to === "ACTIVE" ? "activated" : "deactivated"}`); App.render();
+  } catch (e) { toast(e.message); }
+}
+
+function editSponsorDialog(s){
+  const form = $("#dlgBody"), dlg = $("#dlg");
+  form.innerHTML = `<h2 style="margin:0">Edit ${esc(s.sponsor_name)}</h2>
+    <label class="field">Company name<input type="text" id="esName" maxlength="100" required value="${esc(s.sponsor_name)}"></label>
+    <label class="field">Contact email<input type="text" id="esEmail" maxlength="100" placeholder="optional" value="${esc(s.contact_email || "")}"></label>
+    <label class="field">Phone<input type="text" id="esPhone" maxlength="20" placeholder="optional" value="${esc(s.phone || "")}"></label>
+    <label class="field">Dollar value of 1 point<input type="number" id="esRate" min="0.01" max="1000" step="0.01" required value="${esc(s.point_dollar_rate)}"></label>
+    <p id="esErr" role="alert" style="margin:0;color:var(--red)"></p>
+    <div class="row" style="justify-content:flex-end"><button class="btn ghost" value="cancel" formnovalidate>Cancel</button><button class="btn go" value="ok">Save changes</button></div>`;
+  form.onsubmit = async e => {
+    if (e.submitter?.value !== "ok") return;
+    e.preventDefault(); e.submitter.disabled = true;
+    const body = { sponsor_name: $("#esName").value.trim(), contact_email: $("#esEmail").value.trim(),
+                   phone: $("#esPhone").value.trim(), point_dollar_rate: $("#esRate").value };
+    try {
+      if (LIVE) await App.api(`/api/admin/sponsors/${s.sponsor_id}`, { method: "PATCH", body });
+      else Object.assign(sponsor(s.sponsor_id), body, { point_dollar_rate: +body.point_dollar_rate });
+      form.onsubmit = null; dlg.close(); toast("Changes saved"); App.render();
+    } catch (err) { $("#esErr").textContent = err.message; e.submitter.disabled = false; }
+  };
+  dlg.showModal();
+}
 
 bind.admin.sponsors = () => {
-  document.querySelectorAll("[data-st]").forEach(b=>b.onclick=()=>{const s=sponsor(+b.dataset.st); s.status=s.status==="ACTIVE"?"INACTIVE":"ACTIVE"; toast(`${s.sponsor_name} ${s.status.toLowerCase()}`); App.render();});
+  const find = id => sponsorRows.find(s => s.sponsor_id === id);
+  document.querySelectorAll("[data-st]").forEach(b => b.onclick = () => setSponsorStatus(find(+b.dataset.st)));
+  document.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => editSponsorDialog(find(+b.dataset.edit)));
   $("#addSponsor").onclick = addSponsorDialog;
 };
 
